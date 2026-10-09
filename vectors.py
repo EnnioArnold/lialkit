@@ -62,6 +62,80 @@ def dot(u, v, decimal: bool = False) -> DotResult:
 
 
 # ==========================================================================
+# Summe, Ortsvektoren, Vielfache
+# ==========================================================================
+
+def add(u, v, decimal: bool = False) -> Result:
+    """Summe zweier Vektoren, Eintrag für Eintrag."""
+    u, v = _vec(u), _vec(v)
+    s = u + v
+    out = Result(decimal)
+    out.title = "Vektoraddition"
+    out.summary = "Die Summe ist der Streckenzug: u, dann v dahinter angehängt."
+    out.steps = [
+        Step("Komponentenweise addieren",
+             detail=" , ".join(
+                 f"{tex_number(a, decimal)} + {tex_number(b, decimal)} = "
+                 f"{tex_number(a + b, decimal)}"
+                 for a, b in zip(u.values, v.values)),
+             items=[("u", u), ("v", v)]),
+        Step("Ergebnis", items=[("u + v", s)]),
+    ]
+    out.highlights = [(r"u + v", s)]
+    return out
+
+
+def position(a, b, decimal: bool = False) -> Result:
+    """Ortsvektoren zweier Punkte, Verbindungsvektor AB = B − A und Länge."""
+    a, b = _vec(a), _vec(b)
+    ab = b - a
+    length = ab.norm()
+    out = Result(decimal)
+    out.title = "Ortsvektoren und Verbindungsvektor"
+    out.summary = (f"Der Pfeil von A nach B hat die Länge "
+                   f"{fmt(length, decimal)}.")
+    out.steps = [
+        Step("Ortsvektoren",
+             detail=r"\vec{OA} = A, \quad \vec{OB} = B",
+             note="Der Ortsvektor eines Punktes zeigt vom Ursprung zu ihm — "
+                  "seine Einträge sind die Koordinaten des Punktes.",
+             items=[(r"\vec{OA}", a), (r"\vec{OB}", b)]),
+        Step("Ende minus Anfang",
+             detail=r"\vec{AB} = \vec{OB} - \vec{OA}",
+             items=[(r"\vec{AB}", ab)]),
+        Step("Länge",
+             detail=f"|\\vec{{AB}}| = {tex_number(length, True)}"),
+    ]
+    out.highlights = [(r"\vec{AB}", ab)]
+    return out
+
+
+def scale(u, k, decimal: bool = False) -> Result:
+    """Vielfaches k·u (Skalar mal Vektor)."""
+    u, k = _vec(u), parse_number(k)
+    p = u.scaled(k)
+    out = Result(decimal)
+    out.title = "Skalar mal Vektor"
+    if k == 0:
+        out.summary = "Mit 0 wird jeder Vektor zum Nullvektor."
+    else:
+        out.summary = (f"Die Länge ändert sich um den Faktor "
+                       f"|{fmt(k, decimal)}|, "
+                       + ("die Richtung bleibt." if k > 0
+                          else "die Richtung kehrt sich um."))
+    out.steps = [
+        Step("Jeden Eintrag mit k multiplizieren",
+             detail=" , ".join(
+                 f"{tex_number(k, decimal)} \\cdot {tex_number(a, decimal)} = "
+                 f"{tex_number(k * a, decimal)}" for a in u.values),
+             items=[("u", u)]),
+        Step("Ergebnis", items=[("k \\cdot u", p)]),
+    ]
+    out.highlights = [(r"k \cdot u", p)]
+    return out
+
+
+# ==========================================================================
 # Vektorprodukt und Spatprodukt
 # ==========================================================================
 
