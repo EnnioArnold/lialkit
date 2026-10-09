@@ -695,7 +695,7 @@ def run_methods_checks(appid: str, A, method: str,
 
 
 def run_vector_checks(appid: str, op: str, u, v, w,
-                      decimal: bool = False) -> WolframReport:
+                      decimal: bool = False, k=None) -> WolframReport:
     """Prüft die Vektorrechnungen Eintrag für Eintrag gegen Wolfram."""
     report = WolframReport()
     lit = lambda vec: "{" + ",".join(str(x) for x in vec.values) + "}"  # noqa: E731
@@ -747,6 +747,20 @@ def run_vector_checks(appid: str, op: str, u, v, w,
             except ValueError as exc:
                 report.checks.append(Check("Winkel", "error",
                                            ours=f"{ours:.4f}°", note=str(exc)))
+    elif op in ("add", "position", "scale"):
+        if op == "add":
+            name, query, ours = "Summe", f"{lit(u)}+{lit(v)}", u + v
+        elif op == "position":          # u = A, v = B
+            name, query, ours = ("Verbindungsvektor", f"{lit(v)}-{lit(u)}",
+                                 v - u)
+        else:
+            name, query, ours = ("Vielfaches", f"({k})*{lit(u)}",
+                                 u.scaled(k))
+        report.url = browser_url(query)
+        answers = _ask(appid, {"q": query})
+        _compare(report, name, list(ours.values), answers["q"],
+                 lambda t: parse_wolfram_vector(t, dim),
+                 lambda xs: "(" + ", ".join(fmt(x, decimal) for x in xs) + ")")
     else:
         if v.is_zero():
             raise ValueError("Auf den Nullvektor lässt sich nicht "
@@ -2140,6 +2154,9 @@ VECTOR_OPS = {
     "Spatprodukt": "spat",
     "Winkel": "angle",
     "Projektion": "projection",
+    "Addition": "add",
+    "Ortsvektor / Verbindung": "position",
+    "Skalar · Vektor": "scale",
 }
 
 
@@ -2756,6 +2773,8 @@ class VectorsPage(QWidget):
         self.values = [["1", "2", "3"], ["4", "5", "6"], ["2", "-1", "4"]]
         self.op = "dot"
         self.decimal = False
+        self.k = "2"
+        self.k_field = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(32, 26, 32, 30)
