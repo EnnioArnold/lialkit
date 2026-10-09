@@ -41,6 +41,7 @@ QUALITIES = {
     "low": ("480p15", "-ql"),
     "medium": ("720p30", "-qm"),
     "high": ("1080p60", "-qh"),
+    "ultra": ("1440p60", "-qp"),
 }
 
 
@@ -69,10 +70,14 @@ class AnimationJob:
     moved     — je Übergang bei 'swap' das Zeilenpaar, sonst None
     targets   — je Übergang die Zielzeile
     pivots    — je Zustand die Pivotposition oder None
-    scene     — 'step' | 'full' | 'pivots'
+    scene     — 'step' | 'full' | 'pivots' oder eine der Vektorszenen
+    divider_at— vor welcher Spalte die gestrichelte Linie steht; -1 heisst
+                vor der letzten (die erweiterte Matrix), None heisst keine
+    vectors   — für die Vektorszenen: die Vektoren als Zahlen
+    vector_labels, vector_note — deren Namen und das Ergebnis als Text
     """
-    frames: list[list[list[str]]]
-    captions: list[str]
+    frames: list[list[list[str]]] = field(default_factory=list)
+    captions: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     changed: list[list[tuple[int, int]]] = field(default_factory=list)
     kinds: list[str] = field(default_factory=list)
@@ -80,6 +85,10 @@ class AnimationJob:
     targets: list[int] = field(default_factory=list)
     pivots: list[tuple[int, int] | None] = field(default_factory=list)
     solution: list[str] = field(default_factory=list)
+    divider_at: int | None = -1
+    vectors: list[list[float]] = field(default_factory=list)
+    vector_labels: list[str] = field(default_factory=list)
+    vector_note: str = ""
     title: str = ""
     scene: str = "full"
     theme: Theme = field(default_factory=Theme)
@@ -160,6 +169,102 @@ def job_from_history(history, *, scene: str = "full", theme: Theme | None = None
         theme=theme or Theme(), quality=quality, fmt=fmt)
 
 
+def job_from_steps(steps, *, scene: str = "full", theme: Theme | None = None,
+                   quality: str = "low", fmt: str = "mp4",
+                   decimal: bool = False, title: str = "",
+                   label: str | None = None,
+                   solution: Sequence[str] = ()) -> AnimationJob:
+    """
+    Baut einen Auftrag aus dem Rechenweg eines lialkit-Ergebnisses.
+
+    Ein Schritt zählt, wenn er eine Matrix mitführt — bei der LR-Zerlegung
+    die wachsende rechte obere Dreiecksmatrix, bei der Inversen die Tafel
+    [A | E]. Welche Zellen sich geändert haben, ergibt der Vergleich mit dem
+    vorigen Bild; das ist verlässlicher, als die Zeilenoperation aus dem
+    Begründungstext zurückzulesen.
+
+    `label` wählt aus, welcher Eintrag eines Schrittes die Matrix ist — nötig
+    beim letzten Schritt der LR-Zerlegung, der L und R nebeneinander zeigt.
+    """
+    from lialkit.core import Matrix as _M
+    from lialkit.core import fmt as fmt_value
+    from lialkit.render import tex_to_text
+
+    frames, captions, reasons = [], [], []
+    changed, kinds, moved, targets, pivots = [], [], [], [], []
+    previous = None
+
+    for step in steps:
+        matrix = None
+        for name, obj in step.items:
+            if isinstance(obj, _M) and (label is None or name == label
+                                        or matrix is None):
+                matrix = obj
+                if label is not None and name == label:
+                    break
+        if matrix is None:
+            continue
+        rows = [[fmt_value(v, decimal) for v in row] for row in matrix.rows]
+        if previous is not None and len(rows) != len(previous):
+            continue                      # Formwechsel lässt sich nicht zeigen
+        frames.append(rows)
+        captions.append(tex_to_text(step.title))
+        # Die Begründung steht im Rechenweg als LaTeX; in der Animation gibt
+        # es keinen Formelsatz, also hier in lesbaren Text wandeln.
+        reasons.append(tex_to_text(step.detail))
+        pivots.append(None)
+        if previous is not None:
+            cells = [(r, c) for r in range(len(rows))
+                     for c in range(len(rows[0]))
+                     if rows[r][c] != previous[r][c]]
+            changed.append(cells)
+            kinds.append("add")
+            moved.append(None)
+            # Zielzeile ist die erste geänderte Zeile.
+            targets.append(cells[0][0] if cells else 0)
+        previous = rows
+
+    if len(frames) < 2:
+        raise ValueError("Dieser Rechenweg hat keine Zwischenschritte zum "
+                         "Zeigen.")
+    if scene == "step":
+        frames, captions, reasons = frames[-2:], captions[-2:], reasons[-2:]
+        changed, kinds = changed[-1:], kinds[-1:]
+        moved, targets, pivots = moved[-1:], targets[-1:], pivots[-2:]
+
+    # Bei der Inversen steht [A | E] auf der Tafel: die Trennlinie gehört in
+    # die Mitte. Sonst ist die Matrix nicht erweitert und braucht keine.
+    width = len(frames[0][0])
+    height = len(frames[0])
+    divider = width // 2 if width == 2 * height else None
+
+    return AnimationJob(
+        frames=frames, captions=captions, reasons=reasons, changed=changed,
+        kinds=kinds, moved=moved, targets=targets, pivots=pivots,
+        solution=list(solution), title=title, divider_at=divider,
+        scene="full" if scene == "step" else scene,
+        theme=theme or Theme(), quality=quality, fmt=fmt)
+
+
+def job_from_vectors(scene: str, vectors, labels, note: str = "", *,
+                     theme: Theme | None = None, quality: str = "low",
+                     fmt: str = "mp4", title: str = "") -> AnimationJob:
+    """
+    Baut einen Auftrag für eine der räumlichen Szenen.
+
+    `vectors` sind die beteiligten Vektoren in Zeichenreihenfolge — bei
+    Vektorprodukt und Projektion gehört das Ergebnis als dritter dazu.
+    Gerechnet wird in der App exakt; fürs Zeichnen genügt Gleitkomma.
+    """
+    rows = [[float(c) for c in v] for v in vectors]
+    if any(len(r) not in (2, 3) for r in rows):
+        raise ValueError("Zeichnen lässt sich nur in der Ebene und im Raum.")
+    return AnimationJob(
+        frames=[], captions=[], vectors=rows, vector_labels=list(labels),
+        vector_note=note, scene=scene, title=title,
+        theme=theme or Theme(), quality=quality, fmt=fmt)
+
+
 # --------------------------------------------------------------------------
 # Verfügbarkeit
 # --------------------------------------------------------------------------
@@ -197,13 +302,21 @@ def _build_scenes():
         """Die erweiterte Matrix: Zellen, Klammern, Trennlinie."""
 
         def __init__(self, rows: Sequence[Sequence[str]], theme: Theme,
-                     cell_w: float, cell_h: float, font_size: int, **kw):
+                     cell_w: float, cell_h: float, font_size: int,
+                     divider_at: int | None = -1, **kw):
             super().__init__(**kw)
             self.theme = theme
             self.cell_w, self.cell_h = cell_w, cell_h
             self.font_size = font_size
             self.n_rows = len(rows)
             self.n_cols = len(rows[0])
+            # Vor welcher Spalte die gestrichelte Linie steht. -1 meint die
+            # letzte Spalte, also die rechte Seite einer erweiterten Matrix.
+            self.div_col = (None if divider_at is None
+                            else (self.n_cols - 1 if divider_at < 0
+                                  else divider_at))
+            if self.div_col is not None and not 0 < self.div_col < self.n_cols:
+                self.div_col = None
 
             self.cells = VGroup()
             for r, row in enumerate(rows):
@@ -223,23 +336,25 @@ def _build_scenes():
                     [[width / 2 - arm, height / 2, 0], [width / 2, height / 2, 0],
                      [width / 2, -height / 2, 0], [width / 2 - arm, -height / 2, 0]]))
 
-            # Gestrichelte Linie vor der rechten Seite
-            div_x = (self.cell_center(0, self.n_cols - 2)[0]
-                     + self.cell_center(0, self.n_cols - 1)[0]) / 2
+            # Gestrichelte Linie vor der abgetrennten Spalte
             self.divider = VGroup()
-            y = height / 2 - 0.12
-            while y > -height / 2:
-                seg = VMobject(color=theme.muted, stroke_width=2)
-                seg.set_points_as_corners([[div_x, y, 0], [div_x, y - 0.1, 0]])
-                self.divider.add(seg)
-                y -= 0.22
+            if self.div_col is not None:
+                div_x = (self.cell_center(0, self.div_col - 1)[0]
+                         + self.cell_center(0, self.div_col)[0]) / 2
+                y = height / 2 - 0.12
+                while y > -height / 2:
+                    seg = VMobject(color=theme.muted, stroke_width=2)
+                    seg.set_points_as_corners([[div_x, y, 0],
+                                               [div_x, y - 0.1, 0]])
+                    self.divider.add(seg)
+                    y -= 0.22
 
             self.add(self.brackets, self.divider, self.cells)
 
         def cell_center(self, r: int, c: int):
             x = (c - (self.n_cols - 1) / 2) * self.cell_w
-            # Lücke vor der letzten Spalte
-            if c == self.n_cols - 1:
+            # Lücke hinter der Trennlinie
+            if self.div_col is not None and c >= self.div_col:
                 x += 0.18
             y = ((self.n_rows - 1) / 2 - r) * self.cell_h
             return [x, y, 0]
@@ -288,7 +403,8 @@ def _build_scenes():
 
         def board(self, index: int) -> "MatrixBoard":
             return MatrixBoard(self.job.frames[index], self.theme,
-                               self.cell_w, self.cell_h, self.font_size)
+                               self.cell_w, self.cell_h, self.font_size,
+                               divider_at=self.job.divider_at)
 
         def show_caption(self, board, text: str, reason: str = "",
                          animate: bool = True):
@@ -446,7 +562,231 @@ def _build_scenes():
     return {"step": StepScene, "full": FullScene, "pivots": PivotScene}
 
 
-SCENE_NAMES = {"step": "StepScene", "full": "FullScene", "pivots": "PivotScene"}
+def _build_vector_scenes():
+    """
+    Die räumlichen Szenen — Vektoren, Produkte, Winkel, Projektion.
+
+    Auch hier ohne LaTeX: Beschriftungen sind Text-Objekte. Die Kamera dreht
+    sich langsam, weil erst die Bewegung zeigt, dass etwa u × v wirklich
+    senkrecht auf beiden steht und nicht nur so gezeichnet ist.
+    """
+    from manim import (Arrow3D, Create, DEGREES, DashedLine, FadeIn,
+                       Polygon, Text, ThreeDAxes, ThreeDScene, VGroup,
+                       VMobject, DOWN, UP, LEFT, ORIGIN)
+    import numpy as np
+
+    #: Farben der einzelnen Vektoren, in dieser Reihenfolge vergeben.
+    PALETTE = ["#0071e3", "#ff9f0a", "#30a14e", "#d70015"]
+
+    class VectorScene(ThreeDScene):
+        """Grundlage: Achsen, Vektoren, Beschriftung, Kamerafahrt."""
+
+        def setup(self):
+            self.job = AnimationJob.from_json(os.environ["GAUSS_JOB"])
+            self.theme = self.job.theme
+            self.camera.background_color = self.theme.background
+            self.vecs = [np.array(v + [0.0] * (3 - len(v)), dtype=float)
+                         for v in self.job.vectors]
+            self.names = list(self.job.vector_labels)
+            self.flat = all(abs(v[2]) < 1e-9 for v in self.vecs)
+            span = max(2.0, max((abs(c) for v in self.vecs for c in v),
+                                default=2.0))
+            self.span = span * 1.25
+            # Achsen starten bei 0; nur wo ein Vektor ins Negative reicht,
+            # gehen sie darunter. Eine Einheit ist auf allen Achsen gleich lang.
+            self.unit = 7 / (2 * self.span)      # Zeichenlänge je Einheit
+            lows = [min(0.0, *(v[i] for v in self.vecs)) for i in range(3)]
+            lows = [lo * 1.25 for lo in lows]
+            step = max(1, round(self.span / 4))
+            self.axes = ThreeDAxes(
+                x_range=[lows[0], self.span, step],
+                y_range=[lows[1], self.span, step],
+                z_range=[lows[2], self.span, step],
+                x_length=self.unit * (self.span - lows[0]),
+                y_length=self.unit * (self.span - lows[1]),
+                z_length=self.unit * (self.span - lows[2]))
+            self.axes.set_color(self.theme.muted)
+            self.axes.set_stroke(width=2)
+
+        def point(self, v) -> np.ndarray:
+            """Rechnet einen Vektor in Zeichenkoordinaten um."""
+            return self.axes.c2p(*v)
+
+        def arrow(self, v, color: str, start=None) -> Arrow3D:
+            base = ORIGIN if start is None else start
+            return Arrow3D(start=self.point(base), end=self.point(v + base),
+                           color=color, thickness=0.018,
+                           base_radius=0.055, height=0.28)
+
+        def tag(self, text: str, v, color: str, start=None):
+            base = np.zeros(3) if start is None else start
+            label = Text(text, font_size=26, color=color)
+            label.move_to(self.point((v + base) * 1.12))
+            return label
+
+        def caption(self, text: str, sub: str = ""):
+            """Beschriftung, die bei der Kamerafahrt stehen bleibt."""
+            group = VGroup(Text(text, font_size=30, color=self.theme.text))
+            if sub:
+                group.add(Text(sub, font_size=22, color=self.theme.muted))
+            group.arrange(DOWN, buff=0.18)
+            group.to_corner(UP + LEFT, buff=0.5)
+            self.add_fixed_in_frame_mobjects(group)
+            return group
+
+        def open_view(self, extra=()):
+            """
+            Blickwinkel setzen und das Bild mittig rücken.
+
+            Alle Vektoren gehen vom Ursprung aus; liegen sie im selben
+            Oktanten, hinge die Zeichnung sonst in einer Ecke. Darum die
+            Achsen so verschieben, dass das Gezeigte in der Mitte steht.
+            """
+            if self.flat:
+                self.set_camera_orientation(phi=0, theta=-90 * DEGREES)
+            else:
+                self.set_camera_orientation(phi=66 * DEGREES,
+                                            theta=-52 * DEGREES)
+            points = ([np.zeros(3)] + list(self.vecs)
+                      + [np.array(p, dtype=float) for p in extra])
+            low = np.min(points, axis=0)
+            high = np.max(points, axis=0)
+            middle = (low + high) / 2
+            self.axes.shift(self.point(np.zeros(3)) - self.point(middle))
+            self.add(self.axes)
+
+        def turn(self, seconds: float = 4.0):
+            if self.flat:
+                self.wait(seconds * 0.5)
+                return
+            self.begin_ambient_camera_rotation(rate=0.22)
+            self.wait(seconds)
+            self.stop_ambient_camera_rotation()
+
+        def show_vectors(self, count: int = 2):
+            drawn = []
+            for i in range(count):
+                arrow = self.arrow(self.vecs[i], PALETTE[i])
+                tag = self.tag(self.names[i], self.vecs[i], PALETTE[i])
+                self.add_fixed_orientation_mobjects(tag)
+                self.play(Create(arrow), FadeIn(tag), run_time=0.7)
+                drawn.append((arrow, tag))
+            return drawn
+
+        def arc(self, u, v, radius: float, color: str) -> VMobject:
+            """Ein Bogen zwischen zwei Richtungen, Punkt für Punkt gesetzt."""
+            a = u / max(np.linalg.norm(u), 1e-12)
+            b = v / max(np.linalg.norm(v), 1e-12)
+            cos = float(np.clip(np.dot(a, b), -1, 1))
+            theta = np.arccos(cos)
+            perp = b - cos * a
+            norm = np.linalg.norm(perp)
+            if norm < 1e-9:                       # parallel: kein Bogen
+                return VMobject()
+            perp = perp / norm
+            points = [self.point(radius * (np.cos(t) * a + np.sin(t) * perp))
+                      for t in np.linspace(0, theta, 40)]
+            curve = VMobject(color=color, stroke_width=4)
+            curve.set_points_as_corners(points)
+            return curve
+
+        def parallelogram(self, a, b, color: str, opacity=0.25, start=None):
+            o = np.zeros(3) if start is None else start
+            return Polygon(self.point(o), self.point(o + a),
+                           self.point(o + a + b), self.point(o + b),
+                           color=color, fill_opacity=opacity,
+                           stroke_width=2)
+
+    class DotScene(VectorScene):
+        """u und v mit dem eingeschlossenen Winkel — darum geht es beim
+        Skalarprodukt."""
+
+        def construct(self):
+            self.open_view()
+            self.caption("Skalarprodukt", self.job.vector_note)
+            self.show_vectors(2)
+            bogen = self.arc(self.vecs[0], self.vecs[1],
+                             0.45 * self.span / 1.25, self.theme.accent)
+            self.play(Create(bogen), run_time=0.8)
+            self.turn(4.5)
+
+    class CrossScene(VectorScene):
+        """u × v fährt senkrecht aus der von u und v aufgespannten Fläche."""
+
+        def construct(self):
+            self.open_view(extra=[self.vecs[0] + self.vecs[1], self.vecs[2]])
+            self.caption("Vektorprodukt", self.job.vector_note)
+            self.show_vectors(2)
+            flaeche = self.parallelogram(self.vecs[0], self.vecs[1],
+                                         self.theme.accent, 0.22)
+            self.play(FadeIn(flaeche), run_time=0.7)
+            senk = self.vecs[2]
+            pfeil = self.arrow(senk, PALETTE[2])
+            tag = self.tag(self.names[2], senk, PALETTE[2])
+            self.add_fixed_orientation_mobjects(tag)
+            self.play(Create(pfeil), FadeIn(tag), run_time=1.0)
+            self.turn(5.0)
+
+    class SpatScene(VectorScene):
+        """Die drei Vektoren spannen einen Körper auf; sein Volumen ist der
+        Betrag des Spatprodukts."""
+
+        def construct(self):
+            u, v, w = self.vecs[:3]
+            self.open_view(extra=[u + v, u + w, v + w, u + v + w])
+            self.caption("Spatprodukt", self.job.vector_note)
+            self.show_vectors(3)
+            # Sechs Flächen übereinander: einzeln sehr durchsichtig, sonst
+            # verschwinden die Vektoren im Körper.
+            faces = VGroup(
+                self.parallelogram(u, v, self.theme.accent, 0.08),
+                self.parallelogram(u, v, self.theme.accent, 0.08, start=w),
+                self.parallelogram(u, w, self.theme.accent, 0.08),
+                self.parallelogram(u, w, self.theme.accent, 0.08, start=v),
+                self.parallelogram(v, w, self.theme.accent, 0.08),
+                self.parallelogram(v, w, self.theme.accent, 0.08, start=u))
+            self.play(FadeIn(faces), run_time=1.0)
+            self.turn(5.5)
+
+    class AngleScene(VectorScene):
+        """Der Winkel zwischen u und v, als Bogen."""
+
+        def construct(self):
+            self.open_view()
+            self.caption("Winkel zwischen u und v", self.job.vector_note)
+            self.show_vectors(2)
+            for radius in (0.3, 0.38, 0.45):
+                bogen = self.arc(self.vecs[0], self.vecs[1],
+                                 radius * self.span / 1.25, self.theme.accent)
+                self.play(Create(bogen), run_time=0.45)
+            self.turn(4.5)
+
+    class ProjectionScene(VectorScene):
+        """u fällt auf v herunter — das Lot zeigt, was Projektion heisst."""
+
+        def construct(self):
+            self.open_view(extra=[self.vecs[2]])
+            self.caption("Projektion von u auf v", self.job.vector_note)
+            self.show_vectors(2)
+            p = self.vecs[2]
+            schatten = self.arrow(p, PALETTE[2])
+            lot = DashedLine(self.point(self.vecs[0]), self.point(p),
+                             color=self.theme.muted, stroke_width=3)
+            tag = self.tag(self.names[2], p, PALETTE[2])
+            self.add_fixed_orientation_mobjects(tag)
+            self.play(Create(lot), run_time=0.8)
+            self.play(Create(schatten), FadeIn(tag), run_time=0.8)
+            self.turn(4.5)
+
+    return {"vec_dot": DotScene, "vec_cross": CrossScene,
+            "vec_spat": SpatScene, "vec_angle": AngleScene,
+            "vec_proj": ProjectionScene}
+
+
+SCENE_NAMES = {"step": "StepScene", "full": "FullScene", "pivots": "PivotScene",
+               "vec_dot": "DotScene", "vec_cross": "CrossScene",
+               "vec_spat": "SpatScene", "vec_angle": "AngleScene",
+               "vec_proj": "ProjectionScene"}
 
 
 # --------------------------------------------------------------------------
@@ -459,13 +799,18 @@ SCENE_NAMES = {"step": "StepScene", "full": "FullScene", "pivots": "PivotScene"}
 _RUNNER = '''
 import os, sys
 sys.path.insert(0, {app_dir!r})
-from gauss_anim import _build_scenes
-_scenes = _build_scenes()
-StepScene = _scenes["step"]
-FullScene = _scenes["full"]
-PivotScene = _scenes["pivots"]
-for _cls in (StepScene, FullScene, PivotScene):
+from gauss_anim import SCENE_NAMES
+
+if {vectors!r}:
+    from gauss_anim import _build_vector_scenes as _build
+else:
+    from gauss_anim import _build_scenes as _build
+
+# Die Klassen entstehen erst zur Laufzeit; Manim sucht sie aber als
+# Modulinhalt. Darum hier unter ihrem Namen ablegen und das Modul umbiegen.
+for _key, _cls in _build().items():
     _cls.__module__ = __name__
+    globals()[SCENE_NAMES[_key]] = _cls
 '''
 
 _PROGRESS = re.compile(r"(\d+)\s*%")
@@ -489,7 +834,10 @@ def render(job: AnimationJob, *, progress: Callable[[int, str], None] | None = N
     work = Path(out_dir) if out_dir else Path(tempfile.mkdtemp(prefix="gauss-anim-"))
     work.mkdir(parents=True, exist_ok=True)
     script = work / "scene_runner.py"
-    script.write_text(_RUNNER.format(app_dir=app_dir), encoding="utf-8")
+    script.write_text(
+        _RUNNER.format(app_dir=app_dir,
+                       vectors=job.scene.startswith("vec_")),
+        encoding="utf-8")
 
     folder, flag = QUALITIES.get(job.quality, QUALITIES["low"])
     name = SCENE_NAMES[job.scene]
@@ -512,7 +860,9 @@ def render(job: AnimationJob, *, progress: Callable[[int, str], None] | None = N
                                bufsize=1)
     # Manim zählt je Animation von 0 bis 100. Für einen Balken, der nicht
     # zurückspringt, zählen wir die abgeschlossenen Animationen mit.
-    expected = max(1, len(job.frames) * 3)
+    # Die Vektorszenen haben keine Bilderfolge; dort ist die Zahl der
+    # Teilanimationen ungefähr fest.
+    expected = 9 if job.scene.startswith("vec_") else max(1, len(job.frames) * 3)
     log: list[str] = []
     done = 0
     last = 0

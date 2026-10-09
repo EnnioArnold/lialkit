@@ -50,6 +50,36 @@ def _finish(fig):
     return fig
 
 
+def _limits(points, pad: float = 0.12):
+    """
+    Achsengrenzen je Richtung: ab 0, nur bei negativen Werten darunter.
+
+    So treffen sich die Achsen im Ursprung und die Vektoren liegen auf ihnen.
+    """
+    out = []
+    for i in range(3):
+        lo = min(0.0, min(p[i] for p in points))
+        hi = max(0.0, max(p[i] for p in points))
+        room = max(hi - lo, 1.0) * pad
+        out.append((lo - room if lo < 0 else 0.0, hi + room if hi > 0 else 0.0))
+    return out
+
+
+def _apply_limits_mpl(ax, lims):
+    ax.set_xlim(*lims[0])
+    ax.set_ylim(*lims[1])
+    ax.set_zlim(*lims[2])
+    ax.set_box_aspect([max(h - l, 1e-9) for l, h in lims])
+
+
+def _scene_axes(lims):
+    """Plotly: Achsenbereiche ab 0, gleiche Massstäbe."""
+    return dict(aspectmode="data",
+                xaxis=dict(title="x", range=list(lims[0])),
+                yaxis=dict(title="y", range=list(lims[1])),
+                zaxis=dict(title="z", range=list(lims[2])))
+
+
 def _style_2d(ax, title: str = ""):
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, color="#d2d2d7", linewidth=0.6, alpha=0.7)
@@ -153,10 +183,7 @@ def _plot_vectors_mpl(vecs, origins, labels, title, dim, chain, size):
         ax.text(x0 + dx, y0 + dy, z0 + dz, f"  {labels[i]}", color=color,
                 fontsize=10)
     all_pts = [[0.0, 0.0, 0.0]] + [_floats(o + v) for o, v in zip(origins, vecs)]
-    bound = max(1.0, max(abs(c) for p in all_pts for c in p) * 1.2)
-    ax.set_xlim(-bound, bound)
-    ax.set_ylim(-bound, bound)
-    ax.set_zlim(-bound, bound)
+    _apply_limits_mpl(ax, _limits(all_pts))
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
@@ -181,12 +208,13 @@ def _plot_vectors_plotly(vecs, origins, labels, title, chain):
             x=[x0 + dx], y=[y0 + dy], z=[z0 + dz], u=[dx], v=[dy], w=[dz],
             sizemode="absolute", sizeref=0.28, anchor="tip",
             showscale=False, colorscale=[[0, color], [1, color]]))
+    pts = [[0.0, 0.0, 0.0]] + [_floats(o + v) for o, v in zip(origins, vecs)] \
+          + [_floats(o) for o in origins]
     figure = go.Figure(data=data)
     figure.update_layout(
         title=title or None, template="plotly_white", height=560,
         margin=dict(l=0, r=0, t=40 if title else 10, b=0),
-        scene=dict(aspectmode="data", xaxis_title="x", yaxis_title="y",
-                   zaxis_title="z"))
+        scene=_scene_axes(_limits(pts)))
     return figure
 
 
@@ -243,7 +271,7 @@ def plot_spat(u, v, w, title: str = "", interactive: bool | None = None,
         figure.update_layout(
             title=title or None, template="plotly_white", height=580,
             margin=dict(l=0, r=0, t=40 if title else 10, b=0),
-            scene=dict(aspectmode="data"))
+            scene=_scene_axes(_limits(corners)))
         return figure
 
     import matplotlib.pyplot as plt
@@ -257,14 +285,7 @@ def plot_spat(u, v, w, title: str = "", interactive: bool | None = None,
         ax.quiver(0, 0, 0, dx, dy, dz, color=COLORS[i],
                   arrow_length_ratio=0.12, linewidth=2.4)
         ax.text(dx, dy, dz, f"  {name}", color=COLORS[i], fontsize=11)
-    # Die Grenzen aus den Ecken ableiten und gleich gross halten, sonst
-    # erscheint der Spat verzerrt.
-    lows = [min(p[i] for p in corners) for i in range(3)]
-    highs = [max(p[i] for p in corners) for i in range(3)]
-    span = max(1.0, max(h - l for l, h in zip(lows, highs))) * 1.12
-    for axis, lo, hi in zip("xyz", lows, highs):
-        mid = (lo + hi) / 2
-        getattr(ax, f"set_{axis}lim")(mid - span / 2, mid + span / 2)
+    _apply_limits_mpl(ax, _limits(corners))
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
@@ -315,6 +336,8 @@ def plot_plane(plane, span=(-2, 2), points=None, title: str = "",
     lo, hi = span
     grid = [lo + (hi - lo) * i / 12 for i in range(13)]
     surface = [[_floats(plane.at(s, t)) for t in grid] for s in grid]
+    plane_pts = [p for row in surface for p in row] + [_floats(plane.p)] \
+        + [_floats(_vec(pt)) for pt in points or []]
 
     if interactive is None:
         interactive = has_plotly()
@@ -343,7 +366,7 @@ def plot_plane(plane, span=(-2, 2), points=None, title: str = "",
         figure.update_layout(
             title=title or None, template="plotly_white", height=580,
             margin=dict(l=0, r=0, t=40 if title else 10, b=0),
-            scene=dict(aspectmode="data"))
+            scene=_scene_axes(_limits(plane_pts)))
         return figure
 
     import matplotlib.pyplot as plt
@@ -364,6 +387,7 @@ def plot_plane(plane, span=(-2, 2), points=None, title: str = "",
     for pt in points or []:
         q = _floats(_vec(pt))
         ax.scatter(*q, color=COLORS[2], s=40)
+    _apply_limits_mpl(ax, _limits(plane_pts))
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")

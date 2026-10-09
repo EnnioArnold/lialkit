@@ -10,6 +10,7 @@ Nötig ist nur Python. Für die Zeichnungen und die App kommt dazu:
 ```bash
 pip install matplotlib plotly        # Zeichnen
 pip install PySide6                  # das Fenster
+brew install cairo pango pkg-config ffmpeg   # Unterbau für Manim
 pip install manim                    # Animationen, freiwillig
 ```
 
@@ -121,14 +122,38 @@ startet die App. Drei Ansichten:
 - **Verfahren** — LR-Zerlegung, Inverse, Determinante und Rang
 - **Vektoren** — Skalar-, Vektor- und Spatprodukt, Winkel, Projektion
 
-Auf den beiden letzten Seiten steht neben dem Rechenweg eine zweite
-Ansicht: **Zeichnung**. Sie zeigt das Bild im Fenster selbst, und
-räumliche Bilder lassen sich dort mit gedrückter Maustaste drehen. Auf der
-Vektorenseite führt »Im Browser öffnen« dieselbe Zeichnung mit Plotly vor —
-mit Zoom und Beschriftung beim Überfahren. Auf der Verfahrensseite zeigt
-die Zeichnung, was die Matrix mit dem Raum macht: bei 2×2 das verzerrte
-Einheitsquadrat, dessen Fläche |det A| ist, bei 3×3 die drei Spalten mit
-dem aufgespannten Spat.
+Auf den beiden letzten Seiten steht die Ergebniskarte in drei Ansichten:
+**Rechenweg**, **Zeichnung** und **Animation**.
+
+Die **Zeichnung** zeigt das Bild im Fenster selbst; räumliche Bilder lassen
+sich dort mit gedrückter Maustaste drehen. Auf der Vektorenseite führt
+»Im Browser öffnen« dieselbe Zeichnung mit Plotly vor — mit Zoom und
+Beschriftung beim Überfahren. Auf der Verfahrensseite zeigt sie, was die
+Matrix mit dem Raum macht: bei 2×2 das verzerrte Einheitsquadrat, dessen
+Fläche |det A| ist, bei 3×3 die drei Spalten mit dem aufgespannten Spat.
+
+Die **Animation** rendert Manim: bei den Verfahren die Umformungen von
+LR-Zerlegung, Inverse und Rang, bei den Vektoren eine räumliche Szene je
+Rechnung — beim Vektorprodukt fährt u × v senkrecht aus der Fläche, beim
+Spatprodukt füllt sich der Körper, bei der Projektion fällt das Lot. Die
+Kamera dreht sich dabei, denn erst die Bewegung zeigt, dass etwas wirklich
+senkrecht steht. Die Determinante hat keine Animation: Sarrus und Laplace
+rechnen ohne Zwischenmatrizen, anschaulich wird sie unter »Zeichnung«.
+
+Gerendert wird als MP4 in drei Stufen — 720p30, 1080p60, 1440p60 — und über
+QtMultimedia abgespielt. Fehlt QtMultimedia, fällt der Abspieler auf ein GIF
+zurück; das kennt nur 256 Farben und sieht entsprechend aus.
+
+Die **Prüfung mit Wolfram|Alpha** gibt es auf allen drei Seiten. Bei den
+Verfahren vergleicht sie Determinante, Rang und — je nach Verfahren —
+Inverse und Stufenform, bei den Vektoren die gewählte Verknüpfung. Eine
+Ausnahme ist die LR-Zerlegung: Wolfram wählt die Pivots nach Betrag, die
+Vorlesung nur bei einer Null an der Pivotstelle, darum kommen beide auf
+verschiedene, gleichermassen richtige L und R. Die App rechnet dort
+stattdessen `L · R = P · A` selbst exakt nach und sagt das im Bericht.
+
+Der Regler Gauss / Gauss-Jordan oben rechts gilt nur für die Gauss-Seite
+und ist auf den beiden anderen ausgegraut.
 
 Fenster und Notebook rechnen mit demselben Modul, darum können sie nicht
 auseinanderlaufen.

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -32,7 +33,7 @@ from typing import Callable, Sequence
 
 from PySide6.QtCore import (QEasingCurve, QObject, QPoint, QPointF,
                             QPropertyAnimation, QRectF, QSize, Qt, QThread,
-                            QTimer, Property, Signal)
+                            QTimer, QUrl, Property, Signal)
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetricsF, QMovie,
                            QPainter, QPainterPath, QPen)
 from PySide6.QtWidgets import (QApplication, QDialog, QFrame,
@@ -41,13 +42,28 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFrame,
                                QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
-# Manim ist freiwillig: fehlt es, verschwindet nur die Animationskarte.
+# Manim ist freiwillig: fehlt es, sagt die Animationskarte, was zu tun ist.
+# gauss_anim liegt neben dieser Datei; bei `python3 -m lialkit.gauss_qt` ist
+# dieser Ordner aber nicht im Suchpfad.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import gauss_anim
     ANIM_IMPORT_ERROR = ""
 except Exception as _exc:                                    # pragma: no cover
     gauss_anim = None
     ANIM_IMPORT_ERROR = str(_exc)
+
+# QtMultimedia spielt das MP4 ab. Das ist der Normalfall; fehlt es, fällt der
+# Abspieler auf das GIF zurück — sichtbar schlechter, weil ein GIF nur 256
+# Farben kennt, aber besser als gar keine Animation.
+try:
+    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer  # noqa: F401
+    from PySide6.QtMultimediaWidgets import QVideoWidget
+    HAS_VIDEO = True
+    VIDEO_IMPORT_ERROR = ""
+except Exception as _exc:                                    # pragma: no cover
+    HAS_VIDEO = False
+    VIDEO_IMPORT_ERROR = str(_exc)
 
 # ==========================================================================
 # Rechenteil
@@ -183,13 +199,17 @@ ANIM_SCENES = {
     "Pivot-Spur": "pivots",
 }
 
-#: Qualitätsstufen: (Manim-Stufe, Breite des GIF, Bilder pro Sekunde, Faktor
-#: für die geschätzte Rechenzeit).
+#: Qualitätsstufen: (Manim-Stufe, Breite eines GIF, Bilder pro Sekunde, Faktor
+#: für die geschätzte Rechenzeit). Die GIF-Werte greifen nur im Rückfall ohne
+#: QtMultimedia; sonst entscheidet die Manim-Stufe über die Auflösung.
 ANIM_QUALITY = {
-    "Normal": ("low", 860, 15, 1.0),
-    "Scharf": ("medium", 1280, 25, 1.75),
-    "Sehr scharf": ("high", 1920, 30, 4.25),
+    "Normal": ("medium", 1280, 25, 1.0),
+    "Scharf": ("high", 1920, 30, 2.4),
+    "Sehr scharf": ("ultra", 2560, 30, 5.0),
 }
+
+#: Ohne QtMultimedia bleibt nur das GIF — kleiner, aber nur 256 Farben.
+ANIM_FORMAT = "mp4" if HAS_VIDEO else "gif"
 
 
 def browser_url(query: str) -> str:
@@ -523,6 +543,224 @@ def run_wolfram_checks(appid: str, original: Matrix, current: Matrix,
     return report
 
 
+def wolfram_number(text: str) -> Num:
+    """
+    Die erste Zahl aus Wolframs Antwort.
+
+    Wolfram hängt gern Einheiten oder Näherungen an — „12.9332 degrees“,
+    „2 sqrt(3) ≈ 3.464“. Gesucht ist die erste Zahl in der ersten Zeile.
+    """
+    line = text.strip().splitlines()[0].replace(MINUS, "-")
+    match = re.search(r"-?\d+(?:\.\d+)?(?:\s*/\s*\d+)?", line)
+    if not match:
+        raise ValueError("Antwort nicht lesbar.")
+    return parse_number(match.group(0).replace(" ", ""))
+
+
+def parse_wolfram_vector(text: str, dim: int) -> list[Num]:
+    """Liest '(-3 | 6 | -3)' oder '(-3, 6, -3)' als Vektor ein."""
+    line = text.strip().splitlines()[0].strip().lstrip("(").rstrip(")")
+    parts = line.split("|") if "|" in line else line.split(",")
+    values = [parse_number(p) for p in parts if p.strip()]
+    if len(values) != dim:
+        raise ValueError("Wolframs Vektor hat eine andere Länge als erwartet.")
+    return values
+
+
+def _ask(appid: str, queries: dict[str, str]) -> dict[str, object]:
+    """Stellt die Anfragen nebeneinander und sammelt Antworten wie Fehler."""
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {key: pool.submit(wolfram_text, appid, q)
+                   for key, q in queries.items()}
+        answers: dict[str, object] = {}
+        for key, fut in futures.items():
+            try:
+                answers[key] = fut.result()
+            except (RuntimeError, ValueError) as exc:
+                answers[key] = exc
+    if answers and all(isinstance(v, Exception) for v in answers.values()):
+        raise RuntimeError(str(next(iter(answers.values()))))
+    return answers
+
+
+def _compare(report: WolframReport, name: str, ours, answer, read,
+             fmt_one=str, note: str = ""):
+    """Ein Prüfpunkt: lesen, vergleichen, eintragen — immer gleich."""
+    if isinstance(answer, Exception):
+        report.checks.append(Check(name, "error", ours=fmt_one(ours),
+                                   note=str(answer)))
+        return
+    try:
+        theirs = read(answer)
+    except (ValueError, IndexError) as exc:
+        report.checks.append(Check(name, "error", ours=fmt_one(ours),
+                                   note=str(exc) or "Antwort nicht lesbar."))
+        return
+    same = theirs == ours
+    report.checks.append(Check(name, "ok" if same else "bad",
+                               ours=fmt_one(ours), theirs=fmt_one(theirs),
+                               note=note if same else ""))
+
+
+def run_methods_checks(appid: str, A, method: str,
+                       decimal: bool = False) -> WolframReport:
+    """
+    Prüft die Verfahren auf einer quadratischen Matrix.
+
+    Die LR-Zerlegung ist der Sonderfall: Wolfram pivotiert nach Betrag, die
+    Vorlesung nur bei einer Null an der Pivotstelle. Zwei richtige
+    Rechnungen kommen damit auf verschiedene L und R — ein Vergleich wäre
+    irreführend. Stattdessen rechnet die App die Identität L · R = P · A
+    selbst exakt nach, und Wolfram liefert mit Determinante und Stufenform
+    eine unabhängige Gegenprobe.
+    """
+    from lialkit.determinant import det as _det_of
+    from lialkit.factor import lu as _lu
+    from lialkit.inverse import inverse as _inverse
+
+    report = WolframReport()
+    rows = [list(row) for row in A.rows]
+    literal = matrix_literal(rows)
+    queries = {"det": f"Det[{literal}]", "rank": f"MatrixRank[{literal}]"}
+    if method == "inverse":
+        queries["inv"] = f"Inverse[{literal}]"
+    if method in ("lu", "rank"):
+        queries["rref"] = f"RowReduce[{literal}]"
+    report.url = browser_url(queries.get("inv") or queries["det"])
+
+    answers = _ask(appid, queries)
+
+    our_det = _det_of(A).value
+    _compare(report, "Determinante", our_det, answers["det"], wolfram_number,
+             lambda x: fmt(x, decimal),
+             note="" if our_det != 0 else "Null — die Matrix ist singulär.")
+
+    our_rank = Fraction(len(A.rref().pivots()))
+    _compare(report, "Rang", our_rank, answers["rank"], wolfram_number,
+             lambda x: str(int(x)))
+
+    if method == "inverse":
+        ans = answers["inv"]
+        if our_det == 0:
+            report.checks.append(Check(
+                "Inverse", "info",
+                note="Es gibt keine — die Determinante ist 0. Wolfram meldet "
+                     "hier ebenfalls einen Fehler."))
+        elif isinstance(ans, Exception):
+            report.checks.append(Check("Inverse", "error", note=str(ans)))
+        else:
+            try:
+                theirs = parse_wolfram_matrix(ans, (A.m, A.n))
+                ours = _inverse(A).inverse
+                same = all(theirs.rows[r][c] == ours.rows[r][c]
+                           for r in range(A.m) for c in range(A.n))
+                report.their_matrix = theirs
+                report.checks.append(Check(
+                    "Inverse", "ok" if same else "bad",
+                    note="Eintrag für Eintrag gleich." if same else
+                         "Unterschiedlich — Wolframs Matrix steht unten."))
+            except ValueError as exc:
+                report.checks.append(Check("Inverse", "error", note=str(exc)))
+
+    if method == "lu":
+        d = _lu(A)
+        report.checks.append(Check(
+            "L · R = P · A", "ok" if d.check() else "bad",
+            note="Von der App exakt nachgerechnet, nicht von Wolfram: "
+                 "Wolfram wählt die Pivots nach Betrag und käme auf ein "
+                 "anderes, ebenso richtiges L und R."))
+
+    if "rref" in answers:
+        ans = answers["rref"]
+        if isinstance(ans, Exception):
+            report.checks.append(Check("Zeilenstufenform", "error",
+                                       note=str(ans)))
+        else:
+            try:
+                theirs = parse_wolfram_matrix(ans, (A.m, A.n))
+                ours = A.rref() if hasattr(A, "rref") else None
+                if ours is None:
+                    report.their_matrix = theirs
+                    report.checks.append(Check("Zeilenstufenform", "info",
+                                               note="Wolframs Form steht unten."))
+                else:
+                    same = all(theirs.rows[r][c] == ours.rows[r][c]
+                               for r in range(A.m) for c in range(A.n))
+                    report.checks.append(Check(
+                        "Zeilenstufenform", "ok" if same else "bad"))
+            except ValueError as exc:
+                report.checks.append(Check("Zeilenstufenform", "error",
+                                           note=str(exc)))
+    return report
+
+
+def run_vector_checks(appid: str, op: str, u, v, w,
+                      decimal: bool = False) -> WolframReport:
+    """Prüft die Vektorrechnungen Eintrag für Eintrag gegen Wolfram."""
+    report = WolframReport()
+    lit = lambda vec: "{" + ",".join(str(x) for x in vec.values) + "}"  # noqa: E731
+    dim = len(u.values)
+
+    if op == "dot":
+        query = f"Dot[{lit(u)},{lit(v)}]"
+        report.url = browser_url(query)
+        answers = _ask(appid, {"q": query})
+        _compare(report, "Skalarprodukt", u.dot(v), answers["q"],
+                 wolfram_number, lambda x: fmt(x, decimal))
+    elif op == "cross":
+        if dim != 3:
+            raise ValueError("Das Vektorprodukt gibt es nur im Raum.")
+        query = f"Cross[{lit(u)},{lit(v)}]"
+        report.url = browser_url(query)
+        answers = _ask(appid, {"q": query})
+        ours = u.cross(v)
+        _compare(report, "Vektorprodukt", list(ours.values), answers["q"],
+                 lambda t: parse_wolfram_vector(t, 3),
+                 lambda xs: "(" + ", ".join(fmt(x, decimal) for x in xs) + ")")
+    elif op == "spat":
+        rows = [list(u.values), list(v.values), list(w.values)]
+        query = f"Det[{matrix_literal(rows)}]"
+        report.url = browser_url(query)
+        answers = _ask(appid, {"q": query})
+        from lialkit.vectors import spat as _spat
+        _compare(report, "Spatprodukt", _spat(u, v, w).value, answers["q"],
+                 wolfram_number, lambda x: fmt(x, decimal))
+    elif op == "angle":
+        query = f"VectorAngle[{lit(u)},{lit(v)}] in degrees"
+        report.url = browser_url(query)
+        answers = _ask(appid, {"q": query})
+        from lialkit.vectors import angle as _angle
+        ours = float(_angle(u, v).degrees)
+        ans = answers["q"]
+        if isinstance(ans, Exception):
+            report.checks.append(Check("Winkel", "error",
+                                       ours=f"{ours:.4f}°", note=str(ans)))
+        else:
+            try:
+                theirs = float(wolfram_number(ans))
+                # Beide runden; auf die vierte Stelle genau zu vergleichen
+                # wäre Haarspalterei.
+                close = abs(theirs - ours) < 0.01
+                report.checks.append(Check(
+                    "Winkel", "ok" if close else "bad",
+                    ours=f"{ours:.4f}°", theirs=f"{theirs:.4f}°"))
+            except ValueError as exc:
+                report.checks.append(Check("Winkel", "error",
+                                           ours=f"{ours:.4f}°", note=str(exc)))
+    else:
+        if v.is_zero():
+            raise ValueError("Auf den Nullvektor lässt sich nicht "
+                             "projizieren.")
+        query = f"Projection[{lit(u)},{lit(v)}]"
+        report.url = browser_url(query)
+        answers = _ask(appid, {"q": query})
+        ours = v.scaled(u.dot(v) / v.dot(v))
+        _compare(report, "Projektion", list(ours.values), answers["q"],
+                 lambda t: parse_wolfram_vector(t, dim),
+                 lambda xs: "(" + ", ".join(fmt(x, decimal) for x in xs) + ")")
+    return report
+
+
 # ==========================================================================
 # Farben und Schriften
 # ==========================================================================
@@ -652,6 +890,8 @@ class Segmented(QWidget):
         super().__init__(parent)
         self.options = list(options)
         self.value = value
+        self.enabled = True
+        self.disabled_hint = ""
         self.font_ = FONTS.f(11)
         metrics = QFontMetricsF(self.font_)
         self.seg_w = seg_width or int(
@@ -663,19 +903,24 @@ class Segmented(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        p.setBrush(qcolor("fill"))
+        p.setBrush(qcolor("fill2") if not self.enabled else qcolor("fill"))
         p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 9, 9)
         p.setFont(self.font_)
         for i, label in enumerate(self.options):
             box = QRectF(3 + i * self.seg_w, 3, self.seg_w, self.height() - 6)
             if i == self.value:
-                p.setBrush(qcolor("seg"))
+                p.setBrush(qcolor("fill") if not self.enabled else qcolor("seg"))
                 p.setPen(Qt.NoPen)
                 p.drawRoundedRect(box, 7, 7)
-            p.setPen(qcolor("text") if i == self.value else qcolor("sec"))
+            if not self.enabled:
+                p.setPen(qcolor("ter"))
+            else:
+                p.setPen(qcolor("text") if i == self.value else qcolor("sec"))
             p.drawText(box, Qt.AlignCenter, label)
 
     def mousePressEvent(self, event):
+        if not self.enabled:
+            return
         i = int((event.position().x() - 3) // self.seg_w)
         if 0 <= i < len(self.options) and i != self.value:
             self.value = i
@@ -684,6 +929,20 @@ class Segmented(QWidget):
 
     def set_value(self, i: int):
         self.value = i
+        self.update()
+
+    def set_enabled(self, on: bool):
+        """
+        Schaltet die Leiste stumm.
+
+        Sie bleibt stehen, damit die Kopfzeile nicht springt, nimmt aber
+        keine Klicks mehr an und zeichnet sich blass.
+        """
+        if self.enabled == on:
+            return
+        self.enabled = on
+        self.setCursor(Qt.PointingHandCursor if on else Qt.ArrowCursor)
+        self.setToolTip("" if on else self.disabled_hint)
         self.update()
 
 
@@ -1544,6 +1803,12 @@ class MethodsPage(QWidget):
     gibt es keine.
     """
 
+    #: Die Pivot-Spur fehlt mit Absicht: diese Rechenwege führen kein Pivot
+    #: mit, das sich markieren liesse.
+    ANIM_SCENES = {"Ganzer Durchlauf": "full", "Letzter Schritt": "step"}
+    ANIM_SUBTITLE = ("Zeigt die Umformungen des gewählten Verfahrens als "
+                     "kurzen Film.")
+
     def __init__(self, window, parent=None):
         super().__init__(parent)
         self.setObjectName("page")
@@ -1636,12 +1901,25 @@ class MethodsPage(QWidget):
                              "dessen Fläche |det A| ist, bei 3×3 die drei "
                              "Spalten als Vektoren samt aufgespanntem Körper.",
                              10, "ter", wrap=True))
+
+        # -- Prüfung
+        self.wolfram = WolframPanel(
+            self._wolfram_run,
+            "Vergleicht Determinante, Rang und — je nach Verfahren — "
+            "Inverse und Stufenform mit Wolfram|Alpha.")
+        left.addWidget(self.wolfram)
         left.addStretch(1)
 
         # -- Ergebnis
         output_card(self, right)
 
         self.render_grid()
+
+    def _wolfram_run(self, appid: str):
+        """Gibt die Prüfung als Aufgabe zurück; ausgeführt wird sie im Faden."""
+        A = self.matrix()
+        method, decimal = self.method, self.decimal
+        return lambda: run_methods_checks(appid, A, method, decimal)
 
     # -- Eingabe ----------------------------------------------------------
 
@@ -1676,7 +1954,11 @@ class MethodsPage(QWidget):
             self.grid.addLayout(row)
 
     def read_fields(self):
+        before = self.draft
         self.draft = [[f.text() for f in row] for row in self.fields]
+        if before != self.draft and getattr(self, "wolfram", None):
+            # Ein Bericht zu einer anderen Matrix wäre schlimmer als keiner.
+            self.wolfram.invalidate()
 
     def resize_matrix(self, delta: int):
         self.read_fields()
@@ -1700,6 +1982,8 @@ class MethodsPage(QWidget):
 
     def set_method(self, index: int):
         self.method = list(METHODS.values())[index]
+        self.wolfram.invalidate()
+        self.anim.refresh()
 
     def set_format(self, index: int):
         self.decimal = bool(index)
@@ -1746,6 +2030,44 @@ class MethodsPage(QWidget):
             return
         self.view.show_result(result, self.decimal)
         show_view(self, 0)
+
+    # -- Animation --------------------------------------------------------
+
+    def anim_key(self):
+        self.read_fields()
+        return (tuple(tuple(row) for row in self.draft), self.method,
+                self.decimal)
+
+    def build_job(self, scene: str, quality: str):
+        """
+        Baut den Auftrag für das gerade gewählte Verfahren.
+
+        Determinante und Inverse-Kurzformel haben keine Zwischenmatrizen;
+        dort gibt es nichts zu animieren, und der Text sagt das statt einen
+        Film zu zeigen, der nichts erklärt.
+        """
+        from lialkit.factor import lu
+        from lialkit.inverse import inverse
+        from lialkit.solving import rank
+
+        if self.method == "det":
+            return ("Die Determinante entsteht ohne Zwischenmatrizen — "
+                    "Sarrus und Laplace rechnen in einer Summe. Anschaulich "
+                    "wird sie unter »Zeichnung«: dort ist |det A| die Fläche "
+                    "beziehungsweise das Volumen.")
+        A = self.matrix()
+        if self.method == "lu":
+            result, picked = lu(A, decimal=self.decimal), "R"
+            title = "LR-Zerlegung"
+        elif self.method == "inverse":
+            result, picked = inverse(A, decimal=self.decimal), None
+            title = "Inverse über Gauss-Jordan"
+        else:
+            result, picked = rank(A, weg=True, decimal=self.decimal), None
+            title = "Rang über die Zeilenstufenform"
+        return gauss_anim.job_from_steps(
+            result.steps, scene=scene, quality=quality,
+            decimal=self.decimal, title=title, label=picked)
 
     # -- Zeichnung --------------------------------------------------------
 
@@ -1804,6 +2126,8 @@ class MethodsPage(QWidget):
             card.restyle()
         self.view._placeholder("Nach dem Themawechsel neu rechnen.")
         self.plot.restyle()
+        self.anim.restyle()
+        self.wolfram.restyle()
 
 
 # ==========================================================================
@@ -1931,6 +2255,456 @@ class PlotCanvas(QWidget):
             self.canvas.draw_idle()
 
 
+class ChecksWorker(QObject):
+    """Führt eine Prüffunktion aus, ohne das Fenster anzuhalten."""
+
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, run):
+        super().__init__()
+        self.run_checks = run
+
+    def run(self):
+        try:
+            self.finished.emit(self.run_checks())
+        except (RuntimeError, ValueError) as exc:
+            self.failed.emit(str(exc))
+
+
+class WolframPanel(QWidget):
+    """
+    Die Prüfung mit Wolfram|Alpha als eigene Karte.
+
+    Sie kennt die Rechnung nicht: `build_checks()` liefert den Bericht, alles
+    andere — AppID, Verbindungstest, Darstellung — ist für jede Seite gleich.
+    """
+
+    def __init__(self, build_checks, subtitle: str, parent=None):
+        super().__init__(parent)
+        self.build_checks = build_checks
+        self.report: WolframReport | None = None
+        self.status: tuple[str, str] | None = None
+        self.thread = None
+        self.worker = None
+        self.decimal = False
+
+        self.card = Card()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self.card)
+        lay = self.card.lay
+        lay.addWidget(label("Prüfung mit Wolfram|Alpha", 15,
+                            weight=QFont.DemiBold))
+        lay.addWidget(label(subtitle, 11, "sec", wrap=True))
+        lay.addSpacing(14)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.btn = pill("Jetzt prüfen", "primary", self.start)
+        row.addWidget(self.btn)
+        self.btn_key = pill("AppID", "secondary", self.ask_appid, small=True)
+        row.addWidget(self.btn_key)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.body = QVBoxLayout()
+        self.body.setSpacing(0)
+        lay.addSpacing(6)
+        lay.addLayout(self.body)
+        self.render()
+
+    # -- Bedienung --------------------------------------------------------
+
+    def ask_appid(self):
+        dialog = AppIDDialog(self.window(), load_appid())
+        if dialog.exec() == QDialog.Accepted:
+            save_appid(dialog.field.text().strip())
+            self.render()
+
+    def start(self):
+        if self.thread is not None:
+            return
+        appid = load_appid()
+        if not appid:
+            self.ask_appid()
+            appid = load_appid()
+            if not appid:
+                return
+        try:
+            run = self.build_checks(appid)
+        except (ValueError, RuntimeError) as exc:
+            self.status = ("bad", str(exc))
+            self.render()
+            return
+        self.report = None
+        self.status = ("busy", "Frage Wolfram|Alpha …")
+        self.render()
+        self.thread = QThread(self)
+        self.worker = ChecksWorker(run)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self._done)
+        self.worker.failed.connect(self._failed)
+        self.thread.start()
+
+    def _stop_thread(self):
+        if self.thread is not None:
+            self.thread.quit()
+            self.thread.wait()
+            self.thread = None
+        self.worker = None
+
+    def _done(self, report):
+        self._stop_thread()
+        self.report, self.status = report, None
+        self.render()
+
+    def _failed(self, message: str):
+        self._stop_thread()
+        self.report, self.status = None, ("bad", message)
+        self.render()
+
+    def invalidate(self):
+        """Nach einer Änderung an der Eingabe gilt der alte Bericht nicht mehr."""
+        if self.report is not None or self.status is not None:
+            self.report, self.status = None, None
+            self.render()
+
+    # -- Darstellung ------------------------------------------------------
+
+    def render(self):
+        while self.body.count():
+            item = self.body.takeAt(0)
+            # Nach setParent(None) gibt das Element den Verweis nicht mehr
+            # heraus — darum vorher festhalten.
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+        self.btn_key.setText("AppID ändern" if load_appid() else "AppID")
+
+        if self.status:
+            level, text = self.status
+            color = {"busy": "sec", "bad": "red", "ok": "green"}[level]
+            self.body.addSpacing(12)
+            self.body.addWidget(label(text, 11, color, wrap=True))
+            self.btn.setEnabled(level != "busy")
+            self.btn.setText("Prüfe …" if level == "busy" else "Jetzt prüfen")
+            return
+
+        self.btn.setEnabled(True)
+        self.btn.setText("Jetzt prüfen")
+        if self.report is None:
+            if not load_appid():
+                self.body.addSpacing(12)
+                self.body.addWidget(label(
+                    "Dafür braucht es einmalig eine kostenlose AppID.",
+                    11, "ter", wrap=True))
+            return
+
+        report = self.report
+        self.body.addSpacing(14)
+        tone = {"ok": ("green", "green_soft"), "bad": ("red", "red_soft"),
+                "warn": ("amber", "amber_soft")}[report.verdict]
+        mark = {"ok": "✓", "bad": "✕", "warn": "!"}[report.verdict]
+        self.body.addWidget(Badge(f"{mark}  {report.headline}", *tone))
+        self.body.addSpacing(10)
+
+        for check in report.checks:
+            glyph = {"ok": "✓", "bad": "✕", "info": "•",
+                     "error": "!"}[check.status]
+            color = {"ok": "green", "bad": "red", "info": "sec",
+                     "error": "amber"}[check.status]
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            row.addWidget(label(glyph, 11, color, weight=QFont.DemiBold))
+            text = check.name
+            if check.theirs and check.theirs != check.ours:
+                text += f":  wir {check.ours}, Wolfram {check.theirs}"
+            elif check.ours:
+                text += f":  {check.ours}"
+            row.addWidget(label(text, 11, wrap=True), 1)
+            holder = QWidget()
+            holder.setLayout(row)
+            self.body.addWidget(holder)
+            if check.note:
+                self.body.addWidget(label("     " + check.note, 10, "ter",
+                                          wrap=True))
+
+        if report.their_matrix is not None:
+            self.body.addSpacing(12)
+            self.body.addWidget(label("Wolframs Matrix", 11, "sec"))
+            cells = [[fmt(v, self.decimal) for v in row]
+                     for row in report.their_matrix.rows]
+            width = max(len(s) for row in cells for s in row)
+            for row in cells:
+                self.body.addWidget(label(
+                    "  " + "  ".join(s.rjust(width) for s in row), 11,
+                    mono=True))
+
+        if report.url:
+            self.body.addSpacing(10)
+            btn = pill("Bei Wolfram öffnen", "plain", small=True)
+            btn.clicked.connect(lambda: webbrowser.open(report.url))
+            self.body.addWidget(btn)
+
+    def restyle(self):
+        self.card.restyle()
+        self.render()
+
+
+def manim_state() -> tuple[bool, str]:
+    """(bereit, Begründung) — einmal zentral statt an jeder Karte neu."""
+    if gauss_anim is None:
+        return False, (ANIM_IMPORT_ERROR
+                       or "Manim lässt sich nicht laden.")
+    return gauss_anim.manim_available()
+
+
+class AnimationPane(QWidget):
+    """
+    Die Animation als eigenständiger Bereich, für jede Seite verwendbar.
+
+    Sie weiss nichts über die Rechnung. Zwei Rückrufe genügen ihr:
+    `build_job(szene, qualität)` liefert einen Auftrag oder einen Text, der
+    erklärt, warum es hier nichts zu zeigen gibt; `key_of()` liefert einen
+    Fingerabdruck der Eingabe, damit ein veralteter Film als solcher
+    gekennzeichnet wird statt stillschweigend falsch dazustehen.
+    """
+
+    def __init__(self, build_job, key_of, scenes: dict | None = None,
+                 subtitle: str = "", parent=None):
+        super().__init__(parent)
+        self.build_job = build_job
+        self.key_of = key_of
+        self.scenes = scenes
+        self.scene = next(iter(scenes.values())) if scenes else "full"
+        self.quality = "Normal"
+        self.thread = None
+        self.worker = None
+        self.out_dir: Path | None = None
+        self.stamp = None
+        self.ready, why = manim_state()
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        self.sub = label(subtitle or "Zeigt die Rechnung als kurzen Film, "
+                                     "gerendert mit Manim.", 11, "sec",
+                         wrap=True)
+        lay.addWidget(self.sub)
+
+        if not self.ready:
+            # Nicht verstecken: Wer die Animation sucht, soll lesen können,
+            # warum sie fehlt und was dagegen hilft.
+            hint = (gauss_anim.INSTALL_HINT if gauss_anim else
+                    "brew install cairo pango pkg-config ffmpeg\n"
+                    "pip install manim")
+            self.sub.setText(f"{why}\n\nSo kommt sie dazu:\n{hint}")
+            lay.addStretch(1)
+            return
+
+        lay.addSpacing(14)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        if scenes:
+            start = next(k for k, v in scenes.items() if v == self.scene)
+            self.pick = Dropdown(list(scenes), value=start)
+            self.pick.setFixedWidth(162)
+            self.pick.picked.connect(self._set_scene)
+            row.addWidget(self.pick)
+        self.quality_pick = Dropdown(list(ANIM_QUALITY), value=self.quality)
+        self.quality_pick.setFixedWidth(118)
+        self.quality_pick.picked.connect(self._set_quality)
+        row.addWidget(self.quality_pick)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        self.btn = pill("Rendern", "primary", self.render)
+        row2.addWidget(self.btn)
+        self.btn_big = pill("Gross anzeigen", "secondary", self.show_big,
+                            small=True)
+        self.btn_big.hide()
+        row2.addWidget(self.btn_big)
+        row2.addStretch(1)
+        lay.addSpacing(10)
+        lay.addLayout(row2)
+
+        self.hint = label("", 10, "ter", wrap=True)
+        lay.addWidget(self.hint)
+
+        self.bar = QProgressBar()
+        self.bar.setObjectName("progress")
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(6)
+        self.bar.hide()
+        lay.addSpacing(10)
+        lay.addWidget(self.bar)
+        self.status = label("", 11, "sec", wrap=True)
+        lay.addWidget(self.status)
+
+        self.player = MoviePlayer()
+        self.player.hide()
+        self.player.clicked.connect(self.show_big)
+        lay.addSpacing(12)
+        lay.addWidget(self.player)
+        lay.addStretch(1)
+        self.refresh()
+
+    # -- Auswahl ----------------------------------------------------------
+
+    def _set_scene(self, name: str):
+        self.scene = self.scenes[name]
+        self.refresh()
+
+    def _set_quality(self, name: str):
+        self.quality = name
+        self.refresh()
+
+    def refresh(self):
+        """Prüft, ob der gezeigte Film noch zur Eingabe passt."""
+        if not self.ready:
+            return
+        busy = self.thread is not None
+        self.btn.setEnabled(not busy)
+        if busy:
+            return
+        if self.player.loaded and self.stamp is not None:
+            if self.stamp != self._stamp_now():
+                self.hint.setText("Zeigt einen früheren Stand. Neu rendern "
+                                  "übernimmt die jetzige Eingabe.")
+                return
+            self.hint.setText("")
+            return
+        self.hint.setText(
+            f"Ungefähr {self.estimate()} Sekunden Rechenzeit — das Rendern "
+            "läuft im Hintergrund, die App bleibt bedienbar.")
+
+    def estimate(self) -> int:
+        """
+        Grobe Schätzung der Rechenzeit.
+
+        Gemessen auf einem Rechner ohne Grafikbeschleunigung: eine räumliche
+        Szene mit Kamerafahrt braucht am längsten, eine Matrixfolge wächst
+        mit der Zahl der Schritte.
+        """
+        factor = ANIM_QUALITY[self.quality][3]
+        if self.scenes is None:            # eine Vektorszene
+            return int(45 * factor)
+        return int(25 * factor)
+
+    def _stamp_now(self):
+        return (self.key_of(), self.scene, self.quality, T["dark"])
+
+    # -- Rendern ----------------------------------------------------------
+
+    def render(self):
+        if not self.ready or self.thread is not None:
+            return
+        quality, width, fps, _ = ANIM_QUALITY[self.quality]
+        try:
+            job = self.build_job(self.scene, quality)
+        except Exception as exc:
+            self._fail(str(exc))
+            return
+        if isinstance(job, str):              # nichts zu zeigen, mit Grund
+            self._fail(job)
+            return
+        job.fmt = ANIM_FORMAT
+        job.gif_width, job.gif_fps = width, fps
+        job.theme = anim_theme()
+
+        if self.out_dir is None:
+            self.out_dir = Path(tempfile.mkdtemp(prefix="lial-anim-"))
+        target = self.out_dir / f"{self.scene}-{self.quality}"
+        shutil.rmtree(target, ignore_errors=True)
+
+        self.player.stop()
+        self.player.hide()
+        self.btn_big.hide()
+        self.btn.setEnabled(False)
+        self.hint.setText("")
+        self.bar.setRange(0, 100)
+        self.bar.setValue(2)
+        self.bar.show()
+        self.status.setText("Manim startet …")
+
+        self.thread = QThread(self)
+        self.worker = AnimationWorker(job, target)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self._progress)
+        self.worker.finished.connect(self._done)
+        self.worker.failed.connect(self._fail)
+        self.thread.start()
+
+    def _progress(self, percent: int, text: str):
+        self.bar.setValue(percent)
+        self.status.setText(text)
+
+    def _finish_thread(self):
+        if self.thread is not None:
+            self.thread.quit()
+            self.thread.wait()
+            self.thread = None
+        self.worker = None
+        self.bar.hide()
+        self.btn.setEnabled(True)
+
+    def _done(self, path: str):
+        self._finish_thread()
+        self.stamp = self._stamp_now()
+        self.status.setText("")
+        size = Path(path).stat().st_size / 1e6
+        res = movie_size(path)
+        self.player.load(path, f"{res.width()}×{res.height()}, "
+                               f"{size:.1f} MB — zum Vergrössern anklicken")
+        self.player.show()
+        self.btn_big.show()
+
+    def _fail(self, message: str):
+        self._finish_thread()
+        self.status.setText(message)
+        self.player.stop()
+        self.player.hide()
+        self.btn_big.hide()
+
+    def show_big(self):
+        if self.player.loaded and self.player.path:
+            AnimationWindow(self.window(), self.player.path,
+                            "Animation").exec()
+
+    # -- Thema und Aufräumen ----------------------------------------------
+
+    def restyle(self):
+        if self.ready:
+            self.player.restyle()
+            self.refresh()
+
+    def shutdown(self):
+        """Beendet einen laufenden Lauf, damit das Fenster schliessen kann."""
+        if self.thread is not None:
+            self.thread.quit()
+            self.thread.wait(3000)
+            self.thread = None
+        if self.ready:
+            self.player.stop()
+        if self.out_dir is not None:
+            shutil.rmtree(self.out_dir, ignore_errors=True)
+            self.out_dir = None
+
+
+def anim_theme():
+    """Die Farben der Animation aus dem gerade gewählten Thema."""
+    return gauss_anim.Theme(
+        background=T["card"], text=T["text"], muted=T["sec"],
+        accent=T["blue"], highlight=T["flash"], pivot=T["blue_soft"],
+        good=T["green"])
+
+
 def output_card(page, parent_layout):
     """
     Legt die Ergebniskarte an: Rechenweg und Zeichnung als zwei Ansichten.
@@ -1941,18 +2715,26 @@ def output_card(page, parent_layout):
     page.card_out = Card()
     parent_layout.addWidget(page.card_out, 1)
     head = QHBoxLayout()
-    page.seg_out = Segmented(["Rechenweg", "Zeichnung"], 0, seg_width=104)
+    page.seg_out = Segmented(["Rechenweg", "Zeichnung", "Animation"], 0,
+                             seg_width=98)
     page.seg_out.changed.connect(lambda i: page.stack_out.setCurrentIndex(i))
     head.addWidget(page.seg_out)
     head.addStretch(1)
     page.card_out.lay.addLayout(head)
     page.card_out.lay.addSpacing(12)
     page.stack_out = QStackedWidget()
-    page.stack_out.setStyleSheet("background: transparent;")
+    # Mit Auswahl, nicht pauschal: eine Regel ohne Auswahl vererbt sich auf
+    # alle Kinder und nähme den Knöpfen darin ihre Farbe.
+    page.stack_out.setObjectName("outstack")
+    page.stack_out.setStyleSheet("#outstack { background: transparent; }")
     page.view = ResultView()
     page.plot = PlotCanvas()
+    page.anim = AnimationPane(page.build_job, page.anim_key,
+                              scenes=getattr(page, "ANIM_SCENES", None),
+                              subtitle=getattr(page, "ANIM_SUBTITLE", ""))
     page.stack_out.addWidget(page.view)
     page.stack_out.addWidget(page.plot)
+    page.stack_out.addWidget(page.anim)
     page.card_out.lay.addWidget(page.stack_out, 1)
     return page.card_out
 
@@ -2045,11 +2827,21 @@ class VectorsPage(QWidget):
                              "drehen. »Im Browser öffnen« nimmt Plotly — "
                              "dasselbe Bild, dafür mit Zoom und Beschriftung "
                              "beim Überfahren.", 10, "ter", wrap=True))
+
+        self.wolfram = WolframPanel(
+            self._wolfram_run,
+            "Rechnet die gewählte Verknüpfung bei Wolfram|Alpha nach — "
+            "Skalar-, Vektor- und Spatprodukt, Winkel, Projektion.")
+        left.addWidget(self.wolfram)
         left.addStretch(1)
 
         output_card(self, right)
-
         self.render_grid()
+
+    def _wolfram_run(self, appid: str):
+        u, v, w = self.vectors()
+        op, decimal = self.op, self.decimal
+        return lambda: run_vector_checks(appid, op, u, v, w, decimal)
 
     def render_grid(self):
         while self.grid.count():
@@ -2081,7 +2873,10 @@ class VectorsPage(QWidget):
             self.grid.addLayout(row)
 
     def read_fields(self):
+        before = self.values
         self.values = [[f.text() for f in row] for row in self.fields]
+        if before != self.values and getattr(self, "wolfram", None):
+            self.wolfram.invalidate()
 
     def set_dim(self, index: int):
         self.read_fields()
@@ -2092,6 +2887,8 @@ class VectorsPage(QWidget):
 
     def set_op(self, name: str):
         self.op = VECTOR_OPS[name]
+        self.wolfram.invalidate()
+        self.anim.refresh()
 
     def vectors(self):
         from lialkit.core import Vector as CoreVector
@@ -2125,6 +2922,54 @@ class VectorsPage(QWidget):
             return
         self.view.show_result(result, self.decimal)
         show_view(self, 0)
+
+    # -- Animation --------------------------------------------------------
+
+    def anim_key(self):
+        self.read_fields()
+        return (tuple(tuple(row) for row in self.values), self.op, self.dim)
+
+    def build_job(self, _scene: str, quality: str):
+        """
+        Die Szene ergibt sich hier aus der Rechnung, nicht aus einer Auswahl.
+
+        Beim Vektorprodukt und bei der Projektion gehört das Ergebnis mit
+        ins Bild — erst dann zeigt die Animation, worum es geht.
+        """
+        from lialkit.vectors import angle, dot, spat
+
+        u, v, w = self.vectors()
+        if self.op == "dot":
+            note = f"u · v = {fmt(dot(u, v).value, self.decimal)}"
+            return gauss_anim.job_from_vectors(
+                "vec_dot", [u.values, v.values], ["u", "v"], note,
+                quality=quality)
+        if self.op == "cross":
+            c = u.cross(v)
+            note = ("u × v = (" +
+                    ", ".join(fmt(x, self.decimal) for x in c.values) + ")")
+            return gauss_anim.job_from_vectors(
+                "vec_cross", [u.values, v.values, c.values],
+                ["u", "v", "u × v"], note, quality=quality)
+        if self.op == "spat":
+            value = spat(u, v, w).value
+            note = f"Volumen = {fmt(abs(value), self.decimal)}"
+            return gauss_anim.job_from_vectors(
+                "vec_spat", [u.values, v.values, w.values], ["u", "v", "w"],
+                note, quality=quality)
+        if self.op == "angle":
+            return gauss_anim.job_from_vectors(
+                "vec_angle", [u.values, v.values], ["u", "v"],
+                angle(u, v).summary, quality=quality)
+        if v.is_zero():
+            return ("Auf den Nullvektor lässt sich nicht projizieren — er "
+                    "gibt keine Richtung vor.")
+        p = v.scaled(u.dot(v) / v.dot(v))
+        note = ("Projektion = (" +
+                ", ".join(fmt(x, self.decimal) for x in p.values) + ")")
+        return gauss_anim.job_from_vectors(
+            "vec_proj", [u.values, v.values, p.values],
+            ["u", "v", "u auf v"], note, quality=quality)
 
     def figure(self, interactive: bool):
         """Baut die Zeichnung zur gerade gewählten Rechnung."""
@@ -2202,6 +3047,30 @@ class VectorsPage(QWidget):
             card.restyle()
         self.view._placeholder("Nach dem Themawechsel neu rechnen.")
         self.plot.restyle()
+        self.anim.restyle()
+        self.wolfram.restyle()
+
+
+def movie_size(path: str) -> QSize:
+    """
+    Die Bildgrösse einer Animation, ohne sie abzuspielen.
+
+    Beim GIF liest QMovie das erste Bild. Beim MP4 steht die Auflösung im
+    Ordnernamen, den Manim anlegt — „1080p60“ —, das erspart ffprobe.
+    """
+    if path.lower().endswith(".mp4"):
+        for part in reversed(Path(path).parts):
+            match = re.fullmatch(r"(\d+)p(\d+)", part)
+            if match:
+                height = int(match.group(1))
+                return QSize(int(round(height * 16 / 9)), height)
+        return QSize(1920, 1080)
+    probe = QMovie(path)
+    probe.jumpToFrame(0)
+    size = probe.currentImage().size()
+    if size.isValid() and size.width() > 0:
+        return size
+    return QSize(860, 484)
 
 
 class AnimationWindow(QDialog):
@@ -2225,9 +3094,7 @@ class AnimationWindow(QDialog):
         self.player = MoviePlayer()
         lay.addWidget(self.player, 1)
 
-        probe = QMovie(path)
-        probe.jumpToFrame(0)
-        source = probe.currentImage().size()
+        source = movie_size(path)
         screen = parent.screen().availableGeometry()
         dpr = self.devicePixelRatioF()
         # Nicht über die echte Auflösung hinaus und nicht über den Bildschirm.
@@ -2390,29 +3257,49 @@ class AnimationWorker(QObject):
 
 class MoviePlayer(QWidget):
     """
-    Spielt das gerenderte GIF ab und passt es der Kartenbreite an.
+    Spielt die gerenderte Animation ab.
 
-    Die Bilder werden selbst gesetzt statt über QLabel.setMovie: nur so lässt
-    sich ihre Pixeldichte angeben, sonst zeigt ein Retina-Bildschirm das GIF
-    auf die doppelte Fläche aufgeblasen und damit unscharf.
+    Zwei Wege, je nach Datei: ein MP4 über QtMultimedia — volle Farbtiefe und
+    bis 1440p — oder ein GIF über QMovie als Rückfall. Beim GIF werden die
+    Bilder selbst gesetzt statt über QLabel.setMovie: nur so lässt sich ihre
+    Pixeldichte angeben, sonst zeigt ein Retina-Bildschirm es auf die
+    doppelte Fläche aufgeblasen und damit unscharf.
     """
 
     clicked = Signal()
+
+    #: Manim rendert immer im Breitbild; danach richtet sich die Höhe.
+    ASPECT = 9 / 16
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.movie: QMovie | None = None
         self.source_size = QSize()
         self.path = ""
+        self.player = None
+        self.audio = None
+        self.aspect = self.ASPECT
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
+
+        self.stage = QStackedWidget()
+        self.stage.setMinimumHeight(150)
+        lay.addWidget(self.stage)
+
         self.screen = QLabel()
         self.screen.setAlignment(Qt.AlignCenter)
-        self.screen.setMinimumHeight(150)
         self.screen.setStyleSheet(
             f"background: {T['fill2']}; border-radius: 12px;")
-        lay.addWidget(self.screen)
+        self.stage.addWidget(self.screen)
+
+        self.video = None
+        if HAS_VIDEO:
+            self.video = QVideoWidget()
+            self.video.setAspectRatioMode(Qt.KeepAspectRatio)
+            self.video.setAutoFillBackground(True)
+            self._paint_video_background()
+            self.stage.addWidget(self.video)
 
         controls = QHBoxLayout()
         controls.setSpacing(8)
@@ -2425,21 +3312,75 @@ class MoviePlayer(QWidget):
         controls.addWidget(self.lbl_info)
         lay.addLayout(controls)
 
+    # -- Zustand ----------------------------------------------------------
+
+    @property
+    def loaded(self) -> bool:
+        return self.movie is not None or self.player is not None
+
     def load(self, path: str, note: str = ""):
         self.stop()
+        if path.lower().endswith(".mp4") and HAS_VIDEO:
+            self._load_video(path)
+        else:
+            self._load_gif(path)
+        self.lbl_info.setText(note)
+
+    # -- MP4 --------------------------------------------------------------
+
+    def _load_video(self, path: str):
+        player = QMediaPlayer(self)
+        # Ohne Tonausgabe meckert Qt auf manchen Rechnern; die Animation hat
+        # keinen Ton, die Ausgabe bleibt darum stumm.
+        self.audio = QAudioOutput(self)
+        self.audio.setMuted(True)
+        player.setAudioOutput(self.audio)
+        player.setVideoOutput(self.video)
+        player.setLoops(QMediaPlayer.Infinite)
+        player.errorOccurred.connect(self._video_failed)
+        player.setSource(QUrl.fromLocalFile(path))
+        self.player = player
+        self.path = path
+        self.stage.setCurrentWidget(self.video)
+        self.rescale()
+        player.play()
+        self.btn_play.setText("Pause")
+
+    def _video_failed(self, _error, text: str):
+        """Fällt auf das GIF neben dem Video zurück, wenn es eines gibt."""
+        gif = Path(self.path).with_suffix(".gif") if self.path else None
+        self._drop_player()
+        if gif is not None and gif.exists():
+            self._load_gif(str(gif))
+            self.lbl_info.setText("Als GIF abgespielt.")
+            return
+        self.stage.setCurrentWidget(self.screen)
+        self.screen.setText(f"Die Animation lässt sich nicht abspielen: {text}")
+
+    def _paint_video_background(self):
+        if self.video is None:
+            return
+        pal = self.video.palette()
+        pal.setColor(self.video.backgroundRole(), QColor(T["fill2"]))
+        self.video.setPalette(pal)
+
+    # -- GIF --------------------------------------------------------------
+
+    def _load_gif(self, path: str):
         movie = QMovie(path)
         if not movie.isValid():
+            self.stage.setCurrentWidget(self.screen)
             self.screen.setText("Die Animation lässt sich nicht abspielen.")
             return
         movie.jumpToFrame(0)
         self.source_size = movie.currentImage().size()
         self.movie = movie
         self.path = path
+        self.stage.setCurrentWidget(self.screen)
         movie.frameChanged.connect(self._show_frame)
         self.rescale()
         movie.start()
         self.btn_play.setText("Pause")
-        self.lbl_info.setText(note)
 
     def _show_frame(self):
         """Ein Bild übernehmen und ihm die Pixeldichte des Bildschirms geben."""
@@ -2451,7 +3392,15 @@ class MoviePlayer(QWidget):
         pix.setDevicePixelRatio(self.devicePixelRatioF())
         self.screen.setPixmap(pix)
 
+    # -- Grösse -----------------------------------------------------------
+
     def rescale(self):
+        if self.player is not None:
+            # Die Höhe aus der Breite ableiten, sonst bleiben schwarze
+            # Balken über und unter dem Bild stehen.
+            width = max(220, self.width() - 4)
+            self.stage.setFixedHeight(max(150, int(width * self.aspect)))
+            return
         if self.movie is None or not self.source_size.isValid():
             return
         if self.source_size.width() <= 0:
@@ -2464,11 +3413,11 @@ class MoviePlayer(QWidget):
         size = QSize(max(1, int(self.source_size.width() * scale)),
                      max(1, int(self.source_size.height() * scale)))
         self.movie.setScaledSize(size)
-        self.screen.setMinimumHeight(int(size.height() / dpr))
+        self.stage.setFixedHeight(int(size.height() / dpr))
         self._show_frame()
 
     def mouseReleaseEvent(self, event):
-        if self.movie is not None and self.screen.geometry().contains(
+        if self.loaded and self.stage.geometry().contains(
                 event.position().toPoint()):
             self.clicked.emit()
 
@@ -2476,7 +3425,14 @@ class MoviePlayer(QWidget):
         super().resizeEvent(event)
         self.rescale()
 
+    # -- Bedienung --------------------------------------------------------
+
     def toggle(self):
+        if self.player is not None:
+            running = self.player.playbackState() == QMediaPlayer.PlayingState
+            self.player.pause() if running else self.player.play()
+            self.btn_play.setText("Abspielen" if running else "Pause")
+            return
         if self.movie is None:
             return
         running = self.movie.state() == QMovie.Running
@@ -2484,13 +3440,33 @@ class MoviePlayer(QWidget):
         self.btn_play.setText("Abspielen" if running else "Pause")
 
     def restart(self):
+        if self.player is not None:
+            self.player.setPosition(0)
+            self.player.play()
+            self.btn_play.setText("Pause")
+            return
         if self.movie is None:
             return
         self.movie.stop()
         self.movie.start()
         self.btn_play.setText("Pause")
 
+    def _drop_player(self):
+        if self.player is not None:
+            try:
+                self.player.errorOccurred.disconnect(self._video_failed)
+            except (RuntimeError, TypeError):
+                pass
+            self.player.stop()
+            self.player.setVideoOutput(None)
+            self.player.deleteLater()
+            self.player = None
+        if self.audio is not None:
+            self.audio.deleteLater()
+            self.audio = None
+
     def stop(self):
+        self._drop_player()
         if self.movie is not None:
             try:
                 self.movie.frameChanged.disconnect(self._show_frame)
@@ -2500,10 +3476,12 @@ class MoviePlayer(QWidget):
             self.movie = None
         self.path = ""
         self.screen.clear()
+        self.stage.setCurrentWidget(self.screen)
 
     def restyle(self):
         self.screen.setStyleSheet(
             f"background: {T['fill2']}; border-radius: 12px;")
+        self._paint_video_background()
 
 
 # ==========================================================================
@@ -2572,6 +3550,7 @@ class MainWindow(QMainWindow):
         nav_lay.addWidget(self.seg_page)
         nav_lay.addStretch(1)
         self.seg_mode = Segmented(["Gauss", "Gauss-Jordan"], 0)
+        self.seg_mode.disabled_hint = ("Gilt nur für die Gauss-Seite.")
         self.seg_mode.changed.connect(self.set_mode)
         nav_lay.addWidget(self.seg_mode)
         nav_lay.addSpacing(10)
@@ -2835,13 +3814,15 @@ class MainWindow(QMainWindow):
         self.anim_sub = label("", 11, "sec", wrap=True)
         lay.addWidget(self.anim_sub)
 
-        ok, why = (gauss_anim.manim_available() if gauss_anim
-                   else (False, ANIM_IMPORT_ERROR or "Manim ist nicht installiert."))
+        ok, why = manim_state()
         self.anim_ready = ok
         if not ok:
-            # Ohne Manim bleibt die Karte unsichtbar, die App läuft weiter.
-            self.anim_sub.setText(why)
-            self.card_anim.hide()
+            # Die Karte bleibt stehen: Wer die Animation sucht, soll lesen
+            # können, warum sie fehlt und was dagegen hilft.
+            self.anim_sub.setText(
+                f"{why}\n\nSo kommt sie dazu:\n"
+                + (gauss_anim.INSTALL_HINT if gauss_anim else
+                   "pip install manim"))
             return
 
         self.anim_sub.setText("Zeigt die Umformung als kurzen Film, gerendert "
@@ -3027,8 +4008,14 @@ class MainWindow(QMainWindow):
     # -- Zustandswechsel --------------------------------------------------
 
     def set_page(self, index: int):
-        """Zwischen Gauss, Verfahren und Vektoren umschalten."""
+        """
+        Zwischen Gauss, Verfahren und Vektoren umschalten.
+
+        Gauss gegen Gauss-Jordan betrifft nur die erste Seite; auf den
+        beiden anderen bleibt die Leiste stehen, aber blass und stumm.
+        """
         self.stack.setCurrentIndex(index)
+        self.seg_mode.set_enabled(index == 0)
 
     def set_theme(self, index: int):
         T.clear()
@@ -3447,7 +4434,7 @@ class MainWindow(QMainWindow):
             self.anim_hint.setText("Noch keine Schritte zum Zeigen.")
             self.btn_anim.setEnabled(False)
             return
-        if self.player.movie is not None and self.anim_stamp is not None:
+        if self.player.loaded and self.anim_stamp is not None:
             # Das GIF ist gebrannt: Stand, Qualität und Thema von damals
             # stecken darin. Je nachdem, was sich geändert hat, ein anderer Satz.
             old_scene, old_steps, old_quality = self.anim_stamp
@@ -3493,7 +4480,8 @@ class MainWindow(QMainWindow):
         quality, width, fps, _ = ANIM_QUALITY[self.anim_quality]
         job = gauss_anim.job_from_history(
             history, scene=self.anim_scene, theme=self._anim_theme(),
-            quality=quality, fmt="gif", decimal=self.decimal, solution=solution)
+            quality=quality, fmt=ANIM_FORMAT, decimal=self.decimal,
+            solution=solution)
         job.gif_width, job.gif_fps = width, fps
 
         if self.anim_dir is None:
@@ -3559,6 +4547,8 @@ class MainWindow(QMainWindow):
             self.player.stop()
         if self.anim_dir is not None:
             shutil.rmtree(self.anim_dir, ignore_errors=True)
+        for page in (self.page_methods, self.page_vectors):
+            page.anim.shutdown()
         super().closeEvent(event)
 
     # -- Zeichnen ---------------------------------------------------------
