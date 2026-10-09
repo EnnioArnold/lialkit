@@ -3900,9 +3900,6 @@ class MainWindow(QMainWindow):
         row.addWidget(self.btn_wolfram)
         self.btn_wolfram_key = pill("AppID", "secondary", self.ask_appid, small=True)
         row.addWidget(self.btn_wolfram_key)
-        self.btn_wolfram_test = pill("Verbindung testen", "plain",
-                                     self.test_connection, small=True)
-        row.addWidget(self.btn_wolfram_test)
         row.addStretch(1)
         lay.addLayout(row)
         self.wolfram_body = QVBoxLayout()
@@ -4356,21 +4353,6 @@ class MainWindow(QMainWindow):
                 self.render_wolfram()
                 return
             self.check_wolfram()
-
-    def test_connection(self):
-        """Prüft Schritt für Schritt, wo die Verbindung hängenbleibt."""
-        self.wolfram = None
-        self.wolfram_status = ("busy", "Teste die Verbindung …")
-        self.render_wolfram()
-        QApplication.processEvents()
-        results = network_selftest(load_appid())
-        lines = []
-        for name, ok, note in results:
-            mark = "✓" if ok else "✕"
-            lines.append(f"{mark}  {name}: {note}")
-        failed = [r for r in results if not r[1]]
-        self.wolfram_status = ("bad" if failed else "ok", "\n".join(lines))
-        self.render_wolfram()
 
     def check_wolfram(self):
         if self.editing or self.running:
