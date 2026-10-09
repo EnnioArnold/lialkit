@@ -695,7 +695,7 @@ def run_methods_checks(appid: str, A, method: str,
 
 
 def run_vector_checks(appid: str, op: str, u, v, w,
-                      decimal: bool = False) -> WolframReport:
+                      decimal: bool = False, k=None) -> WolframReport:
     """Prüft die Vektorrechnungen Eintrag für Eintrag gegen Wolfram."""
     report = WolframReport()
     lit = lambda vec: "{" + ",".join(str(x) for x in vec.values) + "}"  # noqa: E731
@@ -2140,6 +2140,9 @@ VECTOR_OPS = {
     "Spatprodukt": "spat",
     "Winkel": "angle",
     "Projektion": "projection",
+    "Addition": "add",
+    "Ortsvektor / Verbindung": "position",
+    "Skalar · Vektor": "scale",
 }
 
 
