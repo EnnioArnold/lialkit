@@ -114,8 +114,15 @@ Pivotstelle, singuläre Matrix.
 
 ## Das Fenster
 
-`python3 -m lialkit.gauss_qt` aus dem Ordner über `lialkit/`
-startet die App. Drei Ansichten:
+Ordner von GitHub laden, entpacken, dann im Terminal:
+
+```bash
+cd lialkit-main                  # wie der Ordner bei dir heisst
+pip install -r requirements.txt  # einmalig
+python3 gauss_qt.py
+```
+
+Der Ordnername ist egal. Drei Ansichten:
 
 - **Gauss** — Elimination von Hand oder Schritt für Schritt, mit Animation
   und Prüfung über Wolfram|Alpha

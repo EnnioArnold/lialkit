@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -43,9 +44,20 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFrame,
                                QVBoxLayout, QWidget)
 
 # Manim ist freiwillig: fehlt es, sagt die Animationskarte, was zu tun ist.
-# gauss_anim liegt neben dieser Datei; bei `python3 -m lialkit.gauss_qt` ist
-# dieser Ordner aber nicht im Suchpfad.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Dieser Ordner ist selbst das Paket `lialkit` — auch dann, wenn er nach dem
+# GitHub-Download »lialkit-main« heisst oder man direkt `python3 gauss_qt.py`
+# darin aufruft. Darum hier von Hand als Paket anmelden, vor allen Importen.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if "lialkit" not in sys.modules:
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location(
+        "lialkit", os.path.join(_HERE, "__init__.py"),
+        submodule_search_locations=[_HERE])
+    _pkg = _ilu.module_from_spec(_spec)
+    sys.modules["lialkit"] = _pkg
+    _spec.loader.exec_module(_pkg)
+# gauss_anim liegt neben dieser Datei.
+sys.path.insert(0, _HERE)
 try:
     import gauss_anim
     ANIM_IMPORT_ERROR = ""
@@ -695,7 +707,7 @@ def run_methods_checks(appid: str, A, method: str,
 
 
 def run_vector_checks(appid: str, op: str, u, v, w,
-                      decimal: bool = False) -> WolframReport:
+                      decimal: bool = False, k=None) -> WolframReport:
     """Prüft die Vektorrechnungen Eintrag für Eintrag gegen Wolfram."""
     report = WolframReport()
     lit = lambda vec: "{" + ",".join(str(x) for x in vec.values) + "}"  # noqa: E731
@@ -747,6 +759,20 @@ def run_vector_checks(appid: str, op: str, u, v, w,
             except ValueError as exc:
                 report.checks.append(Check("Winkel", "error",
                                            ours=f"{ours:.4f}°", note=str(exc)))
+    elif op in ("add", "position", "scale"):
+        if op == "add":
+            name, query, ours = "Summe", f"{lit(u)}+{lit(v)}", u + v
+        elif op == "position":          # u = A, v = B
+            name, query, ours = ("Verbindungsvektor", f"{lit(v)}-{lit(u)}",
+                                 v - u)
+        else:
+            name, query, ours = ("Vielfaches", f"({k})*{lit(u)}",
+                                 u.scaled(k))
+        report.url = browser_url(query)
+        answers = _ask(appid, {"q": query})
+        _compare(report, name, list(ours.values), answers["q"],
+                 lambda t: parse_wolfram_vector(t, dim),
+                 lambda xs: "(" + ", ".join(fmt(x, decimal) for x in xs) + ")")
     else:
         if v.is_zero():
             raise ValueError("Auf den Nullvektor lässt sich nicht "
@@ -2140,6 +2166,9 @@ VECTOR_OPS = {
     "Spatprodukt": "spat",
     "Winkel": "angle",
     "Projektion": "projection",
+    "Addition": "add",
+    "Ortsvektor / Verbindung": "position",
+    "Skalar · Vektor": "scale",
 }
 
 
@@ -2756,6 +2785,8 @@ class VectorsPage(QWidget):
         self.values = [["1", "2", "3"], ["4", "5", "6"], ["2", "-1", "4"]]
         self.op = "dot"
         self.decimal = False
+        self.k = "2"
+        self.k_field = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(32, 26, 32, 30)
@@ -2841,7 +2872,8 @@ class VectorsPage(QWidget):
     def _wolfram_run(self, appid: str):
         u, v, w = self.vectors()
         op, decimal = self.op, self.decimal
-        return lambda: run_vector_checks(appid, op, u, v, w, decimal)
+        k = self.scalar() if op == "scale" else None
+        return lambda: run_vector_checks(appid, op, u, v, w, decimal, k)
 
     def render_grid(self):
         while self.grid.count():
@@ -2853,7 +2885,9 @@ class VectorsPage(QWidget):
                         sub.widget().setParent(None)
                         sub.widget().deleteLater()
         self.fields = []
-        for i, name in enumerate(("u", "v", "w")):
+        self.k_field = None
+        names = ("A", "B", "w") if self.op == "position" else ("u", "v", "w")
+        for i, name in enumerate(names):
             row = QHBoxLayout()
             row.setSpacing(6)
             row.addWidget(label(name, 12, weight=QFont.DemiBold))
@@ -2871,12 +2905,30 @@ class VectorsPage(QWidget):
             row.addStretch(1)
             self.fields.append(line)
             self.grid.addLayout(row)
+        if self.op == "scale":
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            row.addWidget(label("k", 12, weight=QFont.DemiBold))
+            self.k_field = QLineEdit(self.k)
+            self.k_field.setObjectName("cell")
+            self.k_field.setAlignment(Qt.AlignCenter)
+            self.k_field.setFont(FONTS.f(13))
+            self.k_field.setFixedSize(58, 34)
+            self.k_field.textChanged.connect(self.read_fields)
+            row.addWidget(self.k_field)
+            row.addStretch(1)
+            self.grid.addLayout(row)
 
     def read_fields(self):
-        before = self.values
+        before = (self.values, self.k)
         self.values = [[f.text() for f in row] for row in self.fields]
-        if before != self.values and getattr(self, "wolfram", None):
+        if self.k_field is not None:
+            self.k = self.k_field.text()
+        if before != (self.values, self.k) and getattr(self, "wolfram", None):
             self.wolfram.invalidate()
+
+    def scalar(self):
+        return parse_number(self.k)
 
     def set_dim(self, index: int):
         self.read_fields()
@@ -2886,7 +2938,9 @@ class VectorsPage(QWidget):
         self.render_grid()
 
     def set_op(self, name: str):
+        self.read_fields()
         self.op = VECTOR_OPS[name]
+        self.render_grid()          # Beschriftung A/B und Feld k hängen an op
         self.wolfram.invalidate()
         self.anim.refresh()
 
@@ -2897,16 +2951,24 @@ class VectorsPage(QWidget):
                 for row in self.values]
 
     def compute(self):
-        from lialkit.vectors import angle, cross, dot, projection, spat
+        from lialkit.vectors import (add, angle, cross, dot, position,
+                                     projection, scale, spat)
         try:
             u, v, w = self.vectors()
+            k = self.scalar() if self.op == "scale" else None
         except ValueError as exc:
             self.lbl_err.setText(str(exc))
             self.view.show_error(str(exc))
             return
         self.lbl_err.setText("")
         try:
-            if self.op == "dot":
+            if self.op == "add":
+                result = add(u, v, self.decimal)
+            elif self.op == "position":
+                result = position(u, v, self.decimal)
+            elif self.op == "scale":
+                result = scale(u, k, self.decimal)
+            elif self.op == "dot":
                 result = dot(u, v, self.decimal)
             elif self.op == "cross":
                 result = cross(u, v, self.decimal)
@@ -2927,7 +2989,8 @@ class VectorsPage(QWidget):
 
     def anim_key(self):
         self.read_fields()
-        return (tuple(tuple(row) for row in self.values), self.op, self.dim)
+        return (tuple(tuple(row) for row in self.values), self.op, self.dim,
+                self.k)
 
     def build_job(self, _scene: str, quality: str):
         """
@@ -2938,6 +3001,9 @@ class VectorsPage(QWidget):
         """
         from lialkit.vectors import angle, dot, spat
 
+        if self.op in ("add", "position", "scale"):
+            return ("Für diese Rechnung gibt es keine Animation — "
+                    "»Zeichnen« zeigt das Bild.")
         u, v, w = self.vectors()
         if self.op == "dot":
             note = f"u · v = {fmt(dot(u, v).value, self.decimal)}"
@@ -2975,7 +3041,22 @@ class VectorsPage(QWidget):
         """Baut die Zeichnung zur gerade gewählten Rechnung."""
         from lialkit import plots
 
+        from lialkit.core import Vector as CoreVector
+
         u, v, w = self.vectors()
+        zero = CoreVector([0] * self.dim)
+        if self.op == "add":
+            return plots.plot_vectors(u, v, u + v, origins=[zero, u, zero],
+                                      labels=["u", "v", "u + v"],
+                                      interactive=interactive)
+        if self.op == "position":       # u = A, v = B
+            return plots.plot_vectors(u, v, v - u, origins=[zero, zero, u],
+                                      labels=["OA", "OB", "AB"],
+                                      interactive=interactive)
+        if self.op == "scale":
+            return plots.plot_vectors(u, u.scaled(self.scalar()),
+                                      labels=["u", "k · u"],
+                                      interactive=interactive)
         if self.op == "spat":
             return plots.plot_spat(u, v, w, interactive=interactive)
         if self.op == "cross":
@@ -4798,6 +4879,15 @@ class MainWindow(QMainWindow):
         self.btn_edit.setEnabled(not self.running)
 
 
+def _prewarm_matplotlib():
+    try:
+        import matplotlib.pyplot  # noqa: F401
+        from matplotlib.backends.backend_qtagg import FigureCanvas  # noqa: F401
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    except Exception:
+        pass            # fehlt Matplotlib, meldet »Zeichnen« das selbst
+
+
 def main():
     global FONTS
     app = QApplication(sys.argv)
@@ -4805,6 +4895,10 @@ def main():
     FONTS = Fonts()
     window = MainWindow()
     window.show()
+    # Matplotlib im Hintergrund vorladen, damit das erste »Zeichnen« nicht
+    # das Fenster anhält. Imports sind thread-sicher; die Figur selbst wird
+    # weiter im GUI-Thread gebaut (ponytail: Millisekunden, kein Worker nötig).
+    threading.Thread(target=_prewarm_matplotlib, daemon=True).start()
     sys.exit(app.exec())
 
 
