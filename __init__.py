@@ -43,8 +43,8 @@ from .inverse import (InverseResult, inverse, inverse_2x2, is_invertible,
                       solve_with_inverse)
 from .render import Result, Step, show_matrix, tex_matrix, tex_vector, text_matrix
 from .vectors import (AngleResult, CrossResult, DotResult, Line, Plane,
-                      SpatResult, angle, cauchy_schwarz, cross, dot,
-                      projection, spat, triangle_inequality)
+                      SpatResult, add, angle, cauchy_schwarz, cross, dot,
+                      position, projection, scale, spat, triangle_inequality)
 from .solving import GaussResult, gauss, gauss_jordan, rank, solve
 from .plots import (plot_line, plot_plane, plot_spat, plot_transformation,
                     plot_vectors, has_plotly)
@@ -69,6 +69,7 @@ __all__ = [
     "DetResult",
     # Vektoren
     "dot", "cross", "spat", "angle", "projection", "triple_product",
+    "add", "position", "scale",
     "triangle_inequality", "cauchy_schwarz", "Line", "Plane",
     "DotResult", "CrossResult", "SpatResult", "AngleResult",
     # Zeichnen
