@@ -23,52 +23,12 @@ sys.path.insert(0, '..')
 import lialkit as lk
 ```
 
-## Was es kann
+## Aufbau
 
-```python
-A = lk.Matrix([[2, 1, -1], [-3, -1, 2], [-2, 1, 2]])
-b = lk.Vector([8, -11, -3])
+![Notebook und Fenster rechnen mit demselben Modul](docs/architektur.svg)
 
-lk.gauss(A, b)                 # nur das Ergebnis
-lk.gauss(A, b, weg=True)       # jeder Schritt mit Begründung
-lk.gauss_jordan(A, b, weg=True)
-lk.solve(A, b, method='lu')    # oder 'gauss', 'inverse'
-
-lk.lu(A)                       # LR-Zerlegung, bei Bedarf P·A = L·R
-lk.inverse(A)                  # über Gauss-Jordan
-lk.det(A)                      # Verfahren nach Grösse gewählt
-lk.det_sarrus(A)               # nur 3×3
-lk.det_laplace(A)              # Entwicklung nach einer Zeile
-lk.det_triangular(A)           # über die Dreiecksform
-lk.rank(A, weg=True)
-
-u, v, w = lk.Vector([1, 2, 3]), lk.Vector([4, 5, 6]), lk.Vector([2, -1, 4])
-lk.dot(u, v)
-lk.cross(u, v)
-lk.spat(u, v, w)
-lk.angle(u, v)
-lk.projection(u, v)
-lk.triangle_inequality(u, v)
-lk.cauchy_schwarz(u, v)
-
-g = lk.Line([1, 1], [2, 1])
-h = lk.Line([1, 4], [1, -1])
-g.intersect(h)
-
-E = lk.Plane([1, 2, 4], u=[1, 0, 1], v=[0, 1, -2])
-E.intersect_line(lk.Line([1, 1, 7], [2, 3, 4]))
-
-lk.plot_vectors(u, v)          # 2D und 3D
-lk.plot_spat(u, v, w)          # drehbar, mit Plotly
-lk.plot_transformation(A2)     # Determinante als Flächenfaktor
-```
-
-Jedes Ergebnis zeigt sich im Notebook von selbst und kennt:
-
-- `.as_decimal()` — vier Stellen, wie das Übungsblatt es verlangt
-- `.as_exact()` — zurück zu Brüchen
-- `.latex()` — der Rechenweg zum Einfügen in eine Abgabe
-- `.show()` — ausdrücklich anzeigen
+Notebook und Fenster teilen sich den Rechenkern, darum können ihre Ergebnisse
+nicht auseinanderlaufen.
 
 ## Genauigkeit
 
@@ -161,9 +121,6 @@ stattdessen `L · R = P · A` selbst exakt nach und sagt das im Bericht.
 
 Der Regler Gauss / Gauss-Jordan oben rechts gilt nur für die Gauss-Seite
 und ist auf den beiden anderen ausgegraut.
-
-Fenster und Notebook rechnen mit demselben Modul, darum können sie nicht
-auseinanderlaufen.
 
 ## Geprüft gegen
 
