@@ -64,6 +64,7 @@ try:
 except Exception as _exc:                                    # pragma: no cover
     gauss_anim = None
     ANIM_IMPORT_ERROR = str(_exc)
+from orb import ThinkingOrb
 
 # QtMultimedia spielt das MP4 ab. Das ist der Normalfall; fehlt es, fällt der
 # Abspieler auf das GIF zurück — sichtbar schlechter, weil ein GIF nur 256
@@ -791,21 +792,23 @@ def run_vector_checks(appid: str, op: str, u, v, w,
 # Farben und Schriften
 # ==========================================================================
 
+# Geist-Palette (Werte aus dem Skill vercel-geist-design-system): Schwarz/Weiss,
+# Graustufen, ein Akzentblau für Links und Fokus.
 LIGHT = dict(
-    bg="#f5f5f7", nav="#fbfbfd", card="#ffffff", text="#1d1d1f", sec="#6e6e73",
-    ter="#86868b", line="#d2d2d7", hair="#ededf0", fill="#eaeaef", fill2="#f5f5f7",
-    seg="#ffffff", blue="#0071e3", blue_hi="#2b93ff", blue_soft="#e3effc",
-    green="#1d8a3c", green_soft="#e2f5e8", red="#d70015", red_soft="#fceceb",
-    amber="#a86400", amber_soft="#fdf3d8", flash="#fdeab0",
-    entry="#ffffff", shadow=40, dark=False)
+    bg="#ffffff", nav="#fafafa", card="#ffffff", text="#171717", sec="#4d4d4d",
+    ter="#8f8f8f", line="#eaeaea", hair="#f2f2f2", fill="#f2f2f2", fill2="#fafafa",
+    seg="#ffffff", blue="#006bff", blue_hi="#0059ec", blue_soft="#e9f4ff",
+    green="#18794e", green_soft="#e6f4ec", red="#e5484d", red_soft="#fdecec",
+    amber="#ab5200", amber_soft="#fff4e0", flash="#fff3c4",
+    entry="#ffffff", shadow=20, dark=False)
 
 DARK = dict(
-    bg="#000000", nav="#161617", card="#1c1c1e", text="#f5f5f7", sec="#a1a1a6",
-    ter="#8e8e93", line="#3a3a3c", hair="#2c2c2e", fill="#2c2c2e", fill2="#232325",
-    seg="#5a5a5e", blue="#0a84ff", blue_hi="#3b9dff", blue_soft="#16324f",
-    green="#30d158", green_soft="#15331c", red="#ff453a", red_soft="#3a1c1a",
-    amber="#ffd60a", amber_soft="#3a3113", flash="#4a3f16",
-    entry="#242426", shadow=120, dark=True)
+    bg="#000000", nav="#0a0a0a", card="#0a0a0a", text="#ededed", sec="#a0a0a0",
+    ter="#7d7d7d", line="#2e2e2e", hair="#1f1f1f", fill="#1a1a1a", fill2="#111111",
+    seg="#282828", blue="#006efe", blue_hi="#3291ff", blue_soft="#06193a",
+    green="#46a758", green_soft="#102a16", red="#e5484d", red_soft="#3a1516",
+    amber="#ffb224", amber_soft="#3a2a0a", flash="#3d3210",
+    entry="#0a0a0a", shadow=60, dark=True)
 
 T: dict = dict(LIGHT)
 
@@ -820,12 +823,12 @@ def pick_font(candidates: Sequence[str], fallback: str) -> str:
 
 class Fonts:
     def __init__(self):
-        ui = pick_font(["SF Pro Text", ".AppleSystemUIFont", "Helvetica Neue",
-                        "Segoe UI Variable Text", "Segoe UI", "Inter",
+        ui = pick_font(["Geist", "Inter", "SF Pro Text", ".AppleSystemUIFont",
+                        "Helvetica Neue", "Segoe UI Variable Text", "Segoe UI",
                         "DejaVu Sans"], "Sans Serif")
-        display = pick_font(["SF Pro Display", "SF Pro Text", "Helvetica Neue",
-                             "Segoe UI Variable Display", "Segoe UI", "Inter",
-                             "DejaVu Sans"], ui)
+        display = pick_font(["Geist", "Inter", "SF Pro Display", "SF Pro Text",
+                             "Helvetica Neue", "Segoe UI Variable Display",
+                             "Segoe UI", "DejaVu Sans"], ui)
         mono = pick_font(["SF Mono", "Menlo", "Cascadia Mono", "Consolas",
                           "DejaVu Sans Mono"], "Monospace")
         self.family, self.display, self.mono_family = ui, display, mono
@@ -884,6 +887,25 @@ def paint_value(p: QPainter, center: QPointF, value: Num, color: QColor,
 
 def qcolor(key: str) -> QColor:
     return QColor(T[key])
+
+
+def rise_in(widget: QWidget, dy: int = 10, ms: int = 240):
+    """
+    Lässt ein Widget von unten einschweben.
+
+    Kein Fade: Karten tragen schon einen Schatten-Effekt, und Qt erlaubt
+    pro Widget nur einen Effekt. Der Layout-Pass läuft vorher, damit die
+    Endposition stimmt.
+    """
+    if widget.parentWidget() and widget.parentWidget().layout():
+        widget.parentWidget().layout().activate()
+    end = widget.pos()
+    anim = QPropertyAnimation(widget, b"pos", widget)
+    anim.setDuration(ms)
+    anim.setStartValue(end + QPoint(0, dy))
+    anim.setEndValue(end)
+    anim.setEasingCurve(QEasingCurve.OutCubic)
+    anim.start(QPropertyAnimation.DeleteWhenStopped)
 
 
 class Card(QFrame):
@@ -3419,6 +3441,7 @@ class MoviePlayer(QWidget):
         player.setVideoOutput(self.video)
         player.setLoops(QMediaPlayer.Infinite)
         player.errorOccurred.connect(self._video_failed)
+        player.videoSink().videoSizeChanged.connect(self._video_size)
         player.setSource(QUrl.fromLocalFile(path))
         self.player = player
         self.path = path
@@ -3426,6 +3449,12 @@ class MoviePlayer(QWidget):
         self.rescale()
         player.play()
         self.btn_play.setText("Pause")
+
+    def _video_size(self, size):
+        """Echtes Seitenverhältnis übernehmen, sonst stehen Balken am Rand."""
+        if size.isValid() and size.width() > 0:
+            self.aspect = size.height() / size.width()
+            self.rescale()
 
     def _video_failed(self, _error, text: str):
         """Fällt auf das GIF neben dem Video zurück, wenn es eines gibt."""
@@ -3481,6 +3510,7 @@ class MoviePlayer(QWidget):
             # Balken über und unter dem Bild stehen.
             width = max(220, self.width() - 4)
             self.stage.setFixedHeight(max(150, int(width * self.aspect)))
+            self.updateGeometry()      # sonst bleibt die Karte zu niedrig
             return
         if self.movie is None or not self.source_size.isValid():
             return
@@ -3495,6 +3525,7 @@ class MoviePlayer(QWidget):
                      max(1, int(self.source_size.height() * scale)))
         self.movie.setScaledSize(size)
         self.stage.setFixedHeight(int(size.height() / dpr))
+        self.updateGeometry()
         self._show_frame()
 
     def mouseReleaseEvent(self, event):
@@ -3939,13 +3970,11 @@ class MainWindow(QMainWindow):
         self.anim_hint = label("", 10, "ter", wrap=True)
         lay.addWidget(self.anim_hint)
 
-        self.anim_bar = QProgressBar()
-        self.anim_bar.setObjectName("progress")
-        self.anim_bar.setTextVisible(False)
-        self.anim_bar.setFixedHeight(6)
-        self.anim_bar.hide()
+        self.anim_orb = ThinkingOrb(64)
+        self.anim_orb.set_colors([T['blue'], T['text'], T['sec']])
+        self.anim_orb.hide()
         lay.addSpacing(10)
-        lay.addWidget(self.anim_bar)
+        lay.addWidget(self.anim_orb, alignment=Qt.AlignLeft)
         self.anim_status = label("", 11, "sec", wrap=True)
         lay.addWidget(self.anim_status)
 
@@ -4023,22 +4052,22 @@ class MainWindow(QMainWindow):
         QMainWindow, #page, QStackedWidget {{ background: {T['bg']}; }}
         QScrollArea {{ background: transparent; }}
         #nav {{ background: {T['nav']}; }}
-        #card {{ background: {T['card']}; border-radius: 20px;
-                 border: {'0px' if T['dark'] else '1px'} solid {T['hair']}; }}
+        #card {{ background: {T['card']}; border-radius: 12px;
+                 border: 1px solid {T['line']}; }}
         #hint, #preview {{ background: {T['fill2']}; border-radius: 14px; }}
         #preview {{ padding: 13px 15px; color: {T['text']}; }}
         #histhost {{ background: {T['fill2']}; border-radius: 14px; }}
         #histrow {{ background: transparent; border-radius: 10px; }}
         #histrow:hover {{ background: {T['fill']}; }}
         #histrow_on {{ background: {T['blue_soft']}; border-radius: 10px; }}
-        QPushButton#primary {{ background: {T['blue']}; color: #ffffff;
-            border: none; border-radius: 19px; padding: 0 22px; }}
-        QPushButton#primary:hover {{ background: {T['blue_hi']}; }}
+        QPushButton#primary {{ background: {T['text']}; color: {T['bg']};
+            border: none; border-radius: 6px; padding: 0 22px; }}
+        QPushButton#primary:hover {{ background: {T['sec']}; }}
         QPushButton#primary:disabled {{ background: {T['fill']};
             color: {T['ter']}; }}
-        QPushButton#secondary {{ background: {T['fill']}; color: {T['text']};
-            border: none; border-radius: 15px; padding: 0 18px; }}
-        QPushButton#secondary:hover {{ background: {T['line']}; }}
+        QPushButton#secondary {{ background: transparent; color: {T['text']};
+            border: 1px solid {T['line']}; border-radius: 6px; padding: 0 18px; }}
+        QPushButton#secondary:hover {{ background: {T['fill']}; }}
         QPushButton#secondary:disabled {{ color: {T['ter']}; }}
         QPushButton#plain {{ background: transparent; color: {T['blue']};
             border: none; padding: 0 10px; }}
@@ -4071,6 +4100,8 @@ class MainWindow(QMainWindow):
             border-radius: 3px; }}
         """
         self.setStyleSheet(sheet)
+        if hasattr(self, "anim_orb"):   # apply_theme läuft schon vor dem Bau der Karte
+            self.anim_orb.set_colors([T['blue'], T['text'], T['sec']])
         self.hairline.setStyleSheet(f"background: {T['line']};")
         for card in (self.card_matrix, self.card_ops, self.card_hist,
                      self.card_result, self.card_wolfram, self.card_anim):
@@ -4554,9 +4585,7 @@ class MainWindow(QMainWindow):
 
         self.player.stop()
         self.player.hide()
-        self.anim_bar.setRange(0, 100)
-        self.anim_bar.setValue(2)
-        self.anim_bar.show()
+        self.anim_orb.show()
         self.anim_status.setText("Manim startet …")
         self.btn_anim.setEnabled(False)
         self.anim_theme_dark = T["dark"]
@@ -4574,13 +4603,12 @@ class MainWindow(QMainWindow):
         self.anim_thread.start()
 
     def _anim_progress(self, percent: int, text: str):
-        self.anim_bar.setValue(percent)
         self.anim_status.setText(text)
 
     def _anim_done(self, path: str):
         self.anim_thread = None
         self.anim_path = path
-        self.anim_bar.hide()
+        self.anim_orb.hide()
         self.anim_status.setText("")
         name = [k for k, v in ANIM_SCENES.items() if v == self.anim_scene][0]
         self.player.show()
@@ -4599,7 +4627,7 @@ class MainWindow(QMainWindow):
         self.anim_thread = None
         self.anim_path = ""
         self.btn_anim_big.hide()
-        self.anim_bar.hide()
+        self.anim_orb.hide()
         first = message.strip().splitlines()[0] if message.strip() else "Unbekannt"
         self.anim_status.setText(f"Das Rendern ist fehlgeschlagen: {first}")
         self._update_anim_card()
@@ -4717,7 +4745,9 @@ class MainWindow(QMainWindow):
         if self.editing:
             self.card_result.hide()
             return
-        self.card_result.show()
+        if not self.card_result.isVisible():
+            self.card_result.show()
+            rise_in(self.card_result)
         lay = self.result_lay
         lay.addWidget(label("Ergebnis", 15, weight=QFont.DemiBold))
 
