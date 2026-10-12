@@ -889,25 +889,6 @@ def qcolor(key: str) -> QColor:
     return QColor(T[key])
 
 
-def rise_in(widget: QWidget, dy: int = 10, ms: int = 240):
-    """
-    Lässt ein Widget von unten einschweben.
-
-    Kein Fade: Karten tragen schon einen Schatten-Effekt, und Qt erlaubt
-    pro Widget nur einen Effekt. Der Layout-Pass läuft vorher, damit die
-    Endposition stimmt.
-    """
-    if widget.parentWidget() and widget.parentWidget().layout():
-        widget.parentWidget().layout().activate()
-    end = widget.pos()
-    anim = QPropertyAnimation(widget, b"pos", widget)
-    anim.setDuration(ms)
-    anim.setStartValue(end + QPoint(0, dy))
-    anim.setEndValue(end)
-    anim.setEasingCurve(QEasingCurve.OutCubic)
-    anim.start(QPropertyAnimation.DeleteWhenStopped)
-
-
 class Card(QFrame):
     """Fläche mit runden Ecken und weichem Schatten."""
 
@@ -4747,7 +4728,6 @@ class MainWindow(QMainWindow):
             return
         if not self.card_result.isVisible():
             self.card_result.show()
-            rise_in(self.card_result)
         lay = self.result_lay
         lay.addWidget(label("Ergebnis", 15, weight=QFont.DemiBold))
 
