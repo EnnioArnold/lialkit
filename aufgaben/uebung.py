@@ -24,8 +24,8 @@ from __future__ import annotations
 from fractions import Fraction
 from typing import Callable
 
-from .core import Matrix, Vector, fmt
-from .factor import lu
+from ..rechnen.core import Matrix, Vector, fmt
+from ..rechnen.factor import lu
 
 
 VORLAGE = '''
