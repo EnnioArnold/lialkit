@@ -1,18 +1,21 @@
 # lialkit
 
 Lineare Algebra mit nachvollziehbarem Rechenweg, gebaut zum Modul
-I.BA_LIAL_MM.20 der HSLU. Deckt die Semesterwochen 1 bis 4 ab.
+I.BA_LIAL_MM.20 der HSLU. Deckt die Semesterwochen 1 bis 5 ab: Gauss, LR-Zerlegung,
+Inverse und Determinante, Vektorrechnung und lineare Abbildungen.
 
 ## Installieren
 
 Nötig ist nur Python. Für die Zeichnungen und die App kommt dazu:
 
 ```bash
-pip install matplotlib plotly        # Zeichnen
-pip install PySide6                  # das Fenster
-brew install cairo pango pkg-config ffmpeg   # Unterbau für Manim
-pip install manim                    # Animationen, freiwillig
+pip install -r requirements.txt      # numpy, matplotlib, plotly, PySide6
+pip install manimgx                  # Animationen, freiwillig (Python 3.13+)
 ```
+
+manimgx rendert auf der GPU und schreibt das MP4 ohne ffmpeg. Als Rückfall
+geht Manim CE (`brew install cairo pango pkg-config ffmpeg`, `pip install manim`).
+Die Videos kommen im Swiss-Design: Schwarz/Weiss mit rotem Akzent.
 
 Der Ordner `lialkit/` liegt neben deinen Wochen-Ordnern. Aus einem
 Notebook in `Week 3/` heraus:
@@ -30,6 +33,35 @@ import lialkit as lk
 Notebook und Fenster teilen sich den Rechenkern, darum können ihre Ergebnisse
 nicht auseinanderlaufen.
 
+```
+app/        das Fenster (lialkit_qt.py)
+rechnen/    Rechenkern: core, render, solving, factor, inverse, determinant,
+            vectors und abbildung (SW5)
+grafik/     Zeichnungen (plots, plots_abbildung) und Animationen (anim)
+aufgaben/   Übungsaufgaben (exercises) und Vorlage zum Selbstprüfen (uebung)
+docs/       Architektur-Diagramm
+tests/      ein Testskript je Modul
+```
+
+Im Notebook bleiben die kurzen Namen: `import lialkit as lk`,
+`from lialkit.exercises import liste`, `lialkit.anim` und so weiter.
+
+## Lineare Abbildungen (SW5)
+
+```python
+lk.drehung(30)                         # Matrix der Drehung um 30°
+lk.spiegelung_achse(30)                # Spiegelung an der Achse bei 30°
+lk.abbilden(lk.scherung(1), lk.BUCHSTABE_F_FOLIEN)   # Bildpunkte Q = A·P
+lk.zusammensetzen(A, B)                # erst A, dann B, also B·A
+lk.finde_abbildung([(0,0),(1,0),(1,1),(0,1),(0,0)])   # Matrix aus der Bildfigur
+lk.plot_abbildung(A)                   # Original rot, Bild schwarz
+```
+
+`finde_abbildung` löst Aufgabe 1 vom Blatt: Es liest A aus den Bildern von e₁ und
+e₂ ab, prüft die Ecke (1,1) und begründet sonst, warum es keine lineare Abbildung
+gibt (der Nullpunkt bleibt nicht fest). Dann liefert es die 3×3-Matrix in
+homogenen Koordinaten.
+
 ## Genauigkeit
 
 Gerechnet wird exakt mit Brüchen. `1/3` bleibt `1/3` und wird nie zu
@@ -45,13 +77,13 @@ sie exakt: `|(3,4)| = 5`, nicht `5.0000`.
 ```python
 from lialkit.exercises import liste, aufgabe, loese
 
-liste('SW3')          # welche es gibt
+liste('SW5')          # welche es gibt (SW1 bis SW5)
 aufgabe('SW3.1a')     # die Angabe
 loese('SW3.1a')       # durchgerechnet
 ```
 
-Die Notebooks in `notebooks/` enthalten alle Aufgaben der Wochen 1 bis 4,
-je eine Datei pro Woche.
+Enthalten sind die Aufgaben der Wochen 1 bis 5, zuletzt SW5.1a–e und SW5.2a/b
+(lineare Abbildungen).
 
 **Eine Aufgabe ist bewusst offen gelassen:** SW3 Aufgabe 3 verlangt, dass
 du den LR-Algorithmus selbst programmierst. Dafür gibt es ein Gerüst mit
@@ -79,15 +111,18 @@ Ordner von GitHub laden, entpacken, dann im Terminal:
 ```bash
 cd lialkit-main                  # wie der Ordner bei dir heisst
 pip install -r requirements.txt  # einmalig
-python3 gauss_qt.py
+python3 app/lialkit_qt.py
 ```
 
-Der Ordnername ist egal. Drei Ansichten:
+Der Ordnername ist egal. Das Fenster ist im Swiss-Design gehalten (Schwarz/Weiss,
+rotes Akzent, keine Rundungen), hell oder dunkel. Vier Ansichten:
 
 - **Gauss** — Elimination von Hand oder Schritt für Schritt, mit Animation
   und Prüfung über Wolfram|Alpha
 - **Verfahren** — LR-Zerlegung, Inverse, Determinante und Rang
 - **Vektoren** — Skalar-, Vektor- und Spatprodukt, Winkel, Projektion
+- **Abbildungen** — Skalierung, Drehung, Spiegelung, Scherung, Zusammensetzung;
+  aus der Bildfigur die Matrix ablesen
 
 Verfahren und Vektoren zeigen ihr Ergebnis als Karte mit drei Ansichten:
 **Rechenweg**, **Zeichnung** und **Animation**.
@@ -127,3 +162,10 @@ Die Ergebnisse sind Zahl für Zahl mit `lial-sw-04-loesungen.pdf` verglichen
 worden: Determinanten und Inversen der Aufgaben 1 und 2, einschliesslich
 der beiden singulären Matrizen. Die LR-Zerlegungen aus SW3 sind über
 `L · R = P · A` und `A · x = b` nachgerechnet.
+
+## Tests
+
+```bash
+python3 tests/tests_abbildung.py    # ebenso core, gauss, factor, inverse,
+python3 tests/tests_determinant.py  # vectors, exercises, plots, anim, app
+```
