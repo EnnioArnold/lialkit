@@ -379,6 +379,8 @@ class Result:
             elif isinstance(obj, Vector):
                 lines.append(f"  {label} = "
                              f"({', '.join(fmt(v, self.decimal) for v in obj)})")
+            elif isinstance(obj, str):
+                lines.append(f"  {label} = {obj}")
             else:
                 lines.append(f"  {label} = {fmt(obj, self.decimal)}")
         return "\n".join(lines)

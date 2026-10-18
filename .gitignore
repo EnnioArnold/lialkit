@@ -36,3 +36,4 @@ ENV/
 .AppleDouble
 .LSOverride
 ._*
+tests/shots/
