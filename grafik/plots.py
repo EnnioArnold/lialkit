@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 from typing import Sequence
 
-from .core import Matrix, Vector, fmt
+from ..rechnen.core import Matrix, Vector, fmt
 
 # Dieselbe Farbfolge wie in der Qt-App, damit Fenster und Notebook
 # zusammengehören.
