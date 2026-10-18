@@ -45,9 +45,9 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFrame,
 
 # Manim ist freiwillig: fehlt es, sagt die Animationskarte, was zu tun ist.
 # Dieser Ordner ist selbst das Paket `lialkit` — auch dann, wenn er nach dem
-# GitHub-Download »lialkit-main« heisst oder man direkt `python3 gauss_qt.py`
+# GitHub-Download »lialkit-main« heisst oder man direkt `python3 app/lialkit_qt.py`
 # darin aufruft. Darum hier von Hand als Paket anmelden, vor allen Importen.
-_HERE = os.path.dirname(os.path.abspath(__file__))
+_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if "lialkit" not in sys.modules:
     import importlib.util as _ilu
     _spec = _ilu.spec_from_file_location(
@@ -56,10 +56,9 @@ if "lialkit" not in sys.modules:
     _pkg = _ilu.module_from_spec(_spec)
     sys.modules["lialkit"] = _pkg
     _spec.loader.exec_module(_pkg)
-# gauss_anim liegt neben dieser Datei.
-sys.path.insert(0, _HERE)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # orb liegt neben dieser Datei
 try:
-    import gauss_anim
+    from lialkit.grafik import anim as gauss_anim
     ANIM_IMPORT_ERROR = ""
 except Exception as _exc:                                    # pragma: no cover
     gauss_anim = None
@@ -86,10 +85,10 @@ except Exception as _exc:                                    # pragma: no cover
 # So gibt es nur eine Stelle, an der die Verfahren stehen, und ein Fehler
 # kann sich nicht in einer der beiden Oberflächen verstecken.
 
-from lialkit.core import (MINUS, Num, Operation, Vector, fmt, fmt_factor,
+from lialkit.rechnen.core import (MINUS, Num, Operation, Vector, fmt, fmt_factor,
                           parse_number, tex_number)
-from lialkit.core import Matrix as _CoreMatrix
-from lialkit.determinant import det as _det
+from lialkit.rechnen.core import Matrix as _CoreMatrix
+from lialkit.rechnen.determinant import det as _det
 
 
 class Matrix(_CoreMatrix):
@@ -627,9 +626,9 @@ def run_methods_checks(appid: str, A, method: str,
     selbst exakt nach, und Wolfram liefert mit Determinante und Stufenform
     eine unabhängige Gegenprobe.
     """
-    from lialkit.determinant import det as _det_of
-    from lialkit.factor import lu as _lu
-    from lialkit.inverse import inverse as _inverse
+    from lialkit.rechnen.determinant import det as _det_of
+    from lialkit.rechnen.factor import lu as _lu
+    from lialkit.rechnen.inverse import inverse as _inverse
 
     report = WolframReport()
     rows = [list(row) for row in A.rows]
@@ -735,14 +734,14 @@ def run_vector_checks(appid: str, op: str, u, v, w,
         query = f"Det[{matrix_literal(rows)}]"
         report.url = browser_url(query)
         answers = _ask(appid, {"q": query})
-        from lialkit.vectors import spat as _spat
+        from lialkit.rechnen.vectors import spat as _spat
         _compare(report, "Spatprodukt", _spat(u, v, w).value, answers["q"],
                  wolfram_number, lambda x: fmt(x, decimal))
     elif op == "angle":
         query = f"VectorAngle[{lit(u)},{lit(v)}] in degrees"
         report.url = browser_url(query)
         answers = _ask(appid, {"q": query})
-        from lialkit.vectors import angle as _angle
+        from lialkit.rechnen.vectors import angle as _angle
         ours = float(_angle(u, v).degrees)
         ans = answers["q"]
         if isinstance(ans, Exception):
@@ -1747,7 +1746,7 @@ class ResultView(QScrollArea):
         self.lay.addStretch(1)
 
     def _step_card(self, index: int, step, decimal: bool) -> QWidget:
-        from lialkit.render import tex_to_text
+        from lialkit.rechnen.render import tex_to_text
 
         card = QFrame()
         card.setObjectName("stepcard")
@@ -1785,8 +1784,8 @@ class ResultView(QScrollArea):
         return card
 
     def _item(self, name: str, obj, decimal: bool, big: bool = False):
-        from lialkit.core import Matrix as CoreMatrix, Vector as CoreVector
-        from lialkit.render import tex_to_text
+        from lialkit.rechnen.core import Matrix as CoreMatrix, Vector as CoreVector
+        from lialkit.rechnen.render import tex_to_text
 
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -2021,7 +2020,7 @@ class MethodsPage(QWidget):
     # -- Rechnen ----------------------------------------------------------
 
     def matrix(self):
-        from lialkit.core import Matrix as CoreMatrix
+        from lialkit.rechnen.core import Matrix as CoreMatrix
         self.read_fields()
         rows = []
         for r in self.draft:
@@ -2032,10 +2031,10 @@ class MethodsPage(QWidget):
         return CoreMatrix(rows)
 
     def compute(self):
-        from lialkit.determinant import det
-        from lialkit.factor import lu
-        from lialkit.inverse import inverse
-        from lialkit.solving import rank
+        from lialkit.rechnen.determinant import det
+        from lialkit.rechnen.factor import lu
+        from lialkit.rechnen.inverse import inverse
+        from lialkit.rechnen.solving import rank
 
         try:
             A = self.matrix()
@@ -2075,9 +2074,9 @@ class MethodsPage(QWidget):
         dort gibt es nichts zu animieren, und der Text sagt das statt einen
         Film zu zeigen, der nichts erklärt.
         """
-        from lialkit.factor import lu
-        from lialkit.inverse import inverse
-        from lialkit.solving import rank
+        from lialkit.rechnen.factor import lu
+        from lialkit.rechnen.inverse import inverse
+        from lialkit.rechnen.solving import rank
 
         if self.method == "det":
             return ("Die Determinante entsteht ohne Zwischenmatrizen — "
@@ -2109,7 +2108,7 @@ class MethodsPage(QWidget):
         Bei 3×3 die drei Spalten als Vektoren mit dem Spat, dessen Volumen
         |det A| ist. Grössere Matrizen lassen sich nicht zeichnen.
         """
-        from lialkit import plots
+        from lialkit.grafik import plots
 
         try:
             A = self.matrix()
@@ -2948,13 +2947,13 @@ class VectorsPage(QWidget):
         self.anim.refresh()
 
     def vectors(self):
-        from lialkit.core import Vector as CoreVector
+        from lialkit.rechnen.core import Vector as CoreVector
         self.read_fields()
         return [CoreVector([parse_number(v) for v in row])
                 for row in self.values]
 
     def compute(self):
-        from lialkit.vectors import (add, angle, cross, dot, position,
+        from lialkit.rechnen.vectors import (add, angle, cross, dot, position,
                                      projection, scale, spat)
         try:
             u, v, w = self.vectors()
@@ -3002,7 +3001,7 @@ class VectorsPage(QWidget):
         Beim Vektorprodukt und bei der Projektion gehört das Ergebnis mit
         ins Bild — erst dann zeigt die Animation, worum es geht.
         """
-        from lialkit.vectors import angle, dot, spat
+        from lialkit.rechnen.vectors import angle, dot, spat
 
         if self.op in ("add", "position", "scale"):
             return ("Für diese Rechnung gibt es keine Animation — "
@@ -3042,9 +3041,9 @@ class VectorsPage(QWidget):
 
     def figure(self, interactive: bool):
         """Baut die Zeichnung zur gerade gewählten Rechnung."""
-        from lialkit import plots
+        from lialkit.grafik import plots
 
-        from lialkit.core import Vector as CoreVector
+        from lialkit.rechnen.core import Vector as CoreVector
 
         u, v, w = self.vectors()
         zero = CoreVector([0] * self.dim)
