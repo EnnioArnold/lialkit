@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
 """
-Manim-Animationen für die Gauss-Elimination.
+Manim-Animationen zur linearen Algebra: Gauss-Elimination, Pivots,
+Vektorprodukte.
+
+Swiss Style wie die App: Schwarz/Weiss mit einem Rot (#e60000), keine
+Rundungen, schlichte Linien, Helvetica-artige Schrift.
+
+Engine: manimgx wird bevorzugt (schnell, bringt die Videoausgabe selbst mit,
+kein ffmpeg und kein Cairo/Pango nötig). Ist es nicht installiert, fällt
+alles auf Manim CE zurück. LIALKIT_ENGINE=manim erzwingt den Rückfall.
 
 Bewusst ohne LaTeX: Die Matrix wird aus Text-Objekten und selbst gezeichneten
-Klammern aufgebaut. Dadurch genügen Cairo und Pango, eine TeX-Installation
-ist nicht nötig.
+Klammern aufgebaut. Dadurch ist eine TeX-Installation nicht nötig.
 
 Installation:
-    brew install cairo pango pkg-config ffmpeg      # macOS
-    pip install manim
+    pip install manimgx
+    (Rückfall: brew install cairo pango pkg-config ffmpeg; pip install manim)
 
 Verwendung aus der App:
-    from gauss_anim import AnimationJob, render
+    from lialkit.grafik.anim import AnimationJob, render
     job = AnimationJob(frames=[...], captions=[...], ...)
     pfad = render(job, progress=print)
 
 Direkt von der Kommandozeile (rendert ein Beispiel):
-    python3 gauss_anim.py
+    python3 -m lialkit.grafik.anim [full|step|pivots]
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -28,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Callable, Sequence
@@ -47,14 +56,20 @@ QUALITIES = {
 
 @dataclass
 class Theme:
-    """Farben der Animation, aus dem Thema der App übernommen."""
+    """Farben der Animation: Swiss Style, Schwarz/Weiss mit einem Rot."""
     background: str = "#ffffff"
-    text: str = "#1d1d1f"
-    muted: str = "#86868b"
-    accent: str = "#0071e3"
-    highlight: str = "#fdeab0"
-    pivot: str = "#d8e8fb"
-    good: str = "#1d8a3c"
+    text: str = "#000000"
+    muted: str = "#666666"
+    accent: str = "#e60000"
+    highlight: str = "#f2f2f2"     # Zeilenband bei einer Operation
+    pivot: str = "#e60000"         # Pivotfeld (wird halbtransparent gefüllt)
+    good: str = "#000000"          # Lösungszeilen
+
+    @staticmethod
+    def dark() -> "Theme":
+        return Theme(background="#000000", text="#ffffff", muted="#999999",
+                     accent="#ff3333", highlight="#1a1a1a", pivot="#ff3333",
+                     good="#ffffff")
 
 
 @dataclass
@@ -125,7 +140,7 @@ def job_from_history(history, *, scene: str = "full", theme: Theme | None = None
     muss .rows (Brüche), .m, .n und _leading_col(r) anbieten — das trifft auf
     die Matrix-Klasse der App zu. So bleibt der Rechenweg die einzige Quelle.
     """
-    from gauss_qt import fmt as fmt_value  # dieselbe Zahlendarstellung
+    from ..rechnen.core import fmt as fmt_value  # dieselbe Zahlendarstellung
 
     frames, captions, reasons, pivots = [], [], [], []
     changed, kinds, moved, targets = [], [], [], []
@@ -186,9 +201,9 @@ def job_from_steps(steps, *, scene: str = "full", theme: Theme | None = None,
     `label` wählt aus, welcher Eintrag eines Schrittes die Matrix ist — nötig
     beim letzten Schritt der LR-Zerlegung, der L und R nebeneinander zeigt.
     """
-    from lialkit.core import Matrix as _M
-    from lialkit.core import fmt as fmt_value
-    from lialkit.render import tex_to_text
+    from ..rechnen.core import Matrix as _M
+    from ..rechnen.core import fmt as fmt_value
+    from ..rechnen.render import tex_to_text
 
     frames, captions, reasons = [], [], []
     changed, kinds, moved, targets, pivots = [], [], [], [], []
@@ -269,34 +284,76 @@ def job_from_vectors(scene: str, vectors, labels, note: str = "", *,
 # Verfügbarkeit
 # --------------------------------------------------------------------------
 
+def engine() -> str:
+    """'manimgx' (schnell, bringt die Videoausgabe mit) wenn installiert,
+    sonst 'manim'. LIALKIT_ENGINE=manim erzwingt den Rückfall."""
+    forced = os.environ.get("LIALKIT_ENGINE")
+    if forced in ("manim", "manimgx"):
+        return forced
+    import importlib.util
+    return "manimgx" if importlib.util.find_spec("manimgx") else "manim"
+
+
 def manim_available() -> tuple[bool, str]:
-    """(verfügbar, Begründung) — prüft Manim und ffmpeg ohne Import-Fehler."""
+    """(verfügbar, Begründung) — prüft die Engine (bei Manim auch ffmpeg) ohne Import-Fehler."""
+    name = engine()
     try:
-        import manim  # noqa: F401
+        importlib.import_module(name)
     except ImportError:
-        return False, "Manim ist nicht installiert."
+        return False, "manimgx (oder Manim CE) ist nicht installiert."
     except Exception as exc:                       # defekte Installation
-        return False, f"Manim lässt sich nicht laden: {exc}"
-    if shutil.which("ffmpeg") is None:
+        return False, f"{name} lässt sich nicht laden: {exc}"
+    if name == "manim" and shutil.which("ffmpeg") is None:
         return False, "ffmpeg fehlt — nötig für die Videoausgabe."
     return True, ""
 
 
-INSTALL_HINT = ("brew install cairo pango pkg-config ffmpeg\n"
-                "pip install manim")
+INSTALL_HINT = ("pip install manimgx   # Rendering und Videoausgabe in einem Paket\n"
+                "(Rückfall: Manim CE mit brew install cairo pango pkg-config ffmpeg; pip install manim)")
+
+
+def _pick_font() -> str | None:
+    """Eine Helvetica-artige Schrift, die auf dem Rechner da ist (sonst der Standard der Engine)."""
+    if engine() == "manimgx":
+        return "Noto Sans"                         # bringt manimgx selbst mit
+    try:
+        import manimpango
+        have = set(manimpango.list_fonts())
+    except Exception:
+        return None
+    for name in ("Helvetica Neue", "Helvetica", "Arial", "Inter", "DejaVu Sans"):
+        if name in have:
+            return name
+    return None
 
 
 # --------------------------------------------------------------------------
 # Die Szenen
 # --------------------------------------------------------------------------
 
+def _swiss_text(Text):
+    """Text-Klasse, die die Helvetica-artige Schrift als Standard setzt."""
+    font = _pick_font()
+
+    def text(*args, **kw):
+        if font:
+            kw.setdefault("font", font)
+        return Text(*args, **kw)
+    return text
+
+
 def _build_scenes():
     """
     Erzeugt die Szenenklassen erst beim Aufruf, damit das Modul auch ohne
     installiertes Manim importierbar bleibt.
     """
-    from manim import (Scene, VGroup, VMobject, Text, Rectangle, FadeIn, FadeOut,
-                       FadeTransform, Transform, Write, config, DOWN, UP, ORIGIN)
+    mod = importlib.import_module(engine())
+    Scene, VGroup, VMobject, Rectangle, FadeIn, FadeOut, FadeTransform, \
+        Transform, Write, DOWN, UP, ORIGIN = (
+            getattr(mod, n) for n in (
+                "Scene VGroup VMobject Rectangle FadeIn FadeOut FadeTransform "
+                "Transform Write DOWN UP ORIGIN").split())
+    Text = _swiss_text(mod.Text)
 
     class MatrixBoard(VGroup):
         """Die erweiterte Matrix: Zellen, Klammern, Trennlinie."""
@@ -389,7 +446,7 @@ def _build_scenes():
         """Gemeinsame Grundlage: Auftrag laden, Grössen wählen, Beschriftung."""
 
         def setup(self):
-            self.job = AnimationJob.from_json(os.environ["GAUSS_JOB"])
+            self.job = AnimationJob.from_json(os.environ["LIALKIT_JOB"])
             self.theme = self.job.theme
             self.camera.background_color = self.theme.background
             cols = len(self.job.frames[0][0])
@@ -570,19 +627,23 @@ def _build_vector_scenes():
     sich langsam, weil erst die Bewegung zeigt, dass etwa u × v wirklich
     senkrecht auf beiden steht und nicht nur so gezeichnet ist.
     """
-    from manim import (Arrow3D, Create, DEGREES, DashedLine, FadeIn,
-                       Polygon, Text, ThreeDAxes, ThreeDScene, VGroup,
-                       VMobject, DOWN, UP, LEFT, ORIGIN)
+    mod = importlib.import_module(engine())
+    Arrow3D, Create, DEGREES, DashedLine, FadeIn, Polygon, ThreeDAxes, \
+        ThreeDScene, VGroup, VMobject, DOWN, UP, LEFT, ORIGIN = (
+            getattr(mod, n) for n in (
+                "Arrow3D Create DEGREES DashedLine FadeIn Polygon ThreeDAxes "
+                "ThreeDScene VGroup VMobject DOWN UP LEFT ORIGIN").split())
+    Text = _swiss_text(mod.Text)
     import numpy as np
 
     #: Farben der einzelnen Vektoren, in dieser Reihenfolge vergeben.
-    PALETTE = ["#0071e3", "#ff9f0a", "#30a14e", "#d70015"]
+    PALETTE = ["#000000", "#666666", "#e60000", "#999999"]
 
     class VectorScene(ThreeDScene):
         """Grundlage: Achsen, Vektoren, Beschriftung, Kamerafahrt."""
 
         def setup(self):
-            self.job = AnimationJob.from_json(os.environ["GAUSS_JOB"])
+            self.job = AnimationJob.from_json(os.environ["LIALKIT_JOB"])
             self.theme = self.job.theme
             self.camera.background_color = self.theme.background
             self.vecs = [np.array(v + [0.0] * (3 - len(v)), dtype=float)
@@ -799,12 +860,12 @@ SCENE_NAMES = {"step": "StepScene", "full": "FullScene", "pivots": "PivotScene",
 _RUNNER = '''
 import os, sys
 sys.path.insert(0, {app_dir!r})
-from gauss_anim import SCENE_NAMES
+from anim import SCENE_NAMES
 
 if {vectors!r}:
-    from gauss_anim import _build_vector_scenes as _build
+    from anim import _build_vector_scenes as _build
 else:
-    from gauss_anim import _build_scenes as _build
+    from anim import _build_scenes as _build
 
 # Die Klassen entstehen erst zur Laufzeit; Manim sucht sie aber als
 # Modulinhalt. Darum hier unter ihrem Namen ablegen und das Modul umbiegen.
