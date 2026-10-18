@@ -32,22 +32,36 @@ Abgabe.
 
 from __future__ import annotations
 
-from .core import (MINUS, Matrix, Num, Operation, Vector, fmt, fmt_factor,
+from .rechnen.core import (MINUS, Matrix, Num, Operation, Vector, fmt, fmt_factor,
                    is_exact, parse_number, tex_number, triple_product)
-from .determinant import (DetResult, cofactor, det, det_laplace, det_sarrus,
+from .rechnen.determinant import (DetResult, cofactor, det, det_laplace, det_sarrus,
                           det_triangular, minor)
-from .factor import (LUResult, LUSolveResult, back_substitution,
+from .rechnen.factor import (LUResult, LUSolveResult, back_substitution,
                      elimination_matrix, forward_substitution,
                      permutation_matrix, lu, solve_lu, swap_matrix)
-from .inverse import (InverseResult, inverse, inverse_2x2, is_invertible,
+from .rechnen.inverse import (InverseResult, inverse, inverse_2x2, is_invertible,
                       solve_with_inverse)
-from .render import Result, Step, show_matrix, tex_matrix, tex_vector, text_matrix
-from .vectors import (AngleResult, CrossResult, DotResult, Line, Plane,
+from .rechnen.render import Result, Step, show_matrix, tex_matrix, tex_vector, text_matrix
+from .rechnen.vectors import (AngleResult, CrossResult, DotResult, Line, Plane,
                       SpatResult, add, angle, cauchy_schwarz, cross, dot,
                       position, projection, scale, spat, triangle_inequality)
-from .solving import GaussResult, gauss, gauss_jordan, rank, solve
-from .plots import (plot_line, plot_plane, plot_spat, plot_transformation,
+from .rechnen.solving import GaussResult, gauss, gauss_jordan, rank, solve
+from .grafik.plots import (plot_line, plot_plane, plot_spat, plot_transformation,
                     plot_vectors, has_plotly)
+
+# Die Module liegen in Unterordnern; die alten Namen (lialkit.core, lialkit.anim,
+# lialkit.exercises, …) bleiben als Alias erhalten, damit Notebooks weiter laufen.
+import importlib as _il, sys as _sys
+for _alias, _real in (("core", "rechnen.core"), ("render", "rechnen.render"),
+                      ("determinant", "rechnen.determinant"), ("factor", "rechnen.factor"),
+                      ("inverse", "rechnen.inverse"), ("solving", "rechnen.solving"),
+                      ("vectors", "rechnen.vectors"), ("plots", "grafik.plots"),
+                      ("anim", "grafik.anim"), ("exercises", "aufgaben.exercises"),
+                      ("uebung", "aufgaben.uebung")):
+    _m = _il.import_module(f"{__name__}.{_real}")
+    _sys.modules[f"{__name__}.{_alias}"] = _m
+    globals().setdefault(_alias, _m)   # `inverse` bleibt die Funktion, nicht das Modul
+del _il, _sys, _alias, _real, _m
 
 __version__ = "0.1.0"
 
