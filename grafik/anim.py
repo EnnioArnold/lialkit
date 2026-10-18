@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
 """
-Manim-Animationen für die Gauss-Elimination.
+Manim-Animationen zur linearen Algebra: Gauss-Elimination, Pivots,
+Vektorprodukte.
+
+Swiss Style wie die App: Schwarz/Weiss mit einem Rot (#e60000), keine
+Rundungen, schlichte Linien, Helvetica-artige Schrift.
+
+Engine: manimgx wird bevorzugt (schnell, bringt die Videoausgabe selbst mit,
+kein ffmpeg und kein Cairo/Pango nötig). Ist es nicht installiert, fällt
+alles auf Manim CE zurück. LIALKIT_ENGINE=manim erzwingt den Rückfall.
 
 Bewusst ohne LaTeX: Die Matrix wird aus Text-Objekten und selbst gezeichneten
-Klammern aufgebaut. Dadurch genügen Cairo und Pango, eine TeX-Installation
-ist nicht nötig.
+Klammern aufgebaut. Dadurch ist eine TeX-Installation nicht nötig.
 
 Installation:
-    brew install cairo pango pkg-config ffmpeg      # macOS
-    pip install manim
+    pip install manimgx
+    (Rückfall: brew install cairo pango pkg-config ffmpeg; pip install manim)
 
 Verwendung aus der App:
-    from gauss_anim import AnimationJob, render
+    from lialkit.grafik.anim import AnimationJob, render
     job = AnimationJob(frames=[...], captions=[...], ...)
     pfad = render(job, progress=print)
 
 Direkt von der Kommandozeile (rendert ein Beispiel):
-    python3 gauss_anim.py
+    python3 -m lialkit.grafik.anim [full|step|pivots]
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -28,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Callable, Sequence
@@ -47,14 +56,20 @@ QUALITIES = {
 
 @dataclass
 class Theme:
-    """Farben der Animation, aus dem Thema der App übernommen."""
+    """Farben der Animation: Swiss Style, Schwarz/Weiss mit einem Rot."""
     background: str = "#ffffff"
-    text: str = "#1d1d1f"
-    muted: str = "#86868b"
-    accent: str = "#0071e3"
-    highlight: str = "#fdeab0"
-    pivot: str = "#d8e8fb"
-    good: str = "#1d8a3c"
+    text: str = "#000000"
+    muted: str = "#666666"
+    accent: str = "#e60000"
+    highlight: str = "#f2f2f2"     # Zeilenband bei einer Operation
+    pivot: str = "#e60000"         # Pivotfeld (wird halbtransparent gefüllt)
+    good: str = "#000000"          # Lösungszeilen
+
+    @staticmethod
+    def dark() -> "Theme":
+        return Theme(background="#000000", text="#ffffff", muted="#999999",
+                     accent="#ff3333", highlight="#1a1a1a", pivot="#ff3333",
+                     good="#ffffff")
 
 
 @dataclass
@@ -75,6 +90,9 @@ class AnimationJob:
                 vor der letzten (die erweiterte Matrix), None heisst keine
     vectors   — für die Vektorszenen: die Vektoren als Zahlen
     vector_labels, vector_note — deren Namen und das Ergebnis als Text
+    matrix    — für die Szene 'abbild': zwei Zeilen [a, b] oder [a, b, t]; ein
+                dritter Eintrag ist die Verschiebung (homogene Koordinaten).
+                Der Körper steht dann in `vectors` als Punkte (x, y).
     """
     frames: list[list[list[str]]] = field(default_factory=list)
     captions: list[str] = field(default_factory=list)
@@ -89,6 +107,7 @@ class AnimationJob:
     vectors: list[list[float]] = field(default_factory=list)
     vector_labels: list[str] = field(default_factory=list)
     vector_note: str = ""
+    matrix: list[list[float]] = field(default_factory=list)
     title: str = ""
     scene: str = "full"
     theme: Theme = field(default_factory=Theme)
@@ -125,7 +144,7 @@ def job_from_history(history, *, scene: str = "full", theme: Theme | None = None
     muss .rows (Brüche), .m, .n und _leading_col(r) anbieten — das trifft auf
     die Matrix-Klasse der App zu. So bleibt der Rechenweg die einzige Quelle.
     """
-    from gauss_qt import fmt as fmt_value  # dieselbe Zahlendarstellung
+    from ..rechnen.core import fmt as fmt_value  # dieselbe Zahlendarstellung
 
     frames, captions, reasons, pivots = [], [], [], []
     changed, kinds, moved, targets = [], [], [], []
@@ -186,9 +205,9 @@ def job_from_steps(steps, *, scene: str = "full", theme: Theme | None = None,
     `label` wählt aus, welcher Eintrag eines Schrittes die Matrix ist — nötig
     beim letzten Schritt der LR-Zerlegung, der L und R nebeneinander zeigt.
     """
-    from lialkit.core import Matrix as _M
-    from lialkit.core import fmt as fmt_value
-    from lialkit.render import tex_to_text
+    from ..rechnen.core import Matrix as _M
+    from ..rechnen.core import fmt as fmt_value
+    from ..rechnen.render import tex_to_text
 
     frames, captions, reasons = [], [], []
     changed, kinds, moved, targets, pivots = [], [], [], [], []
@@ -265,38 +284,106 @@ def job_from_vectors(scene: str, vectors, labels, note: str = "", *,
         theme=theme or Theme(), quality=quality, fmt=fmt)
 
 
+def job_from_abbildung(matrix, punkte, note: str = "", *,
+                       theme: Theme | None = None, quality: str = "low",
+                       fmt: str = "mp4", title: str = "") -> AnimationJob:
+    """
+    Auftrag für die Szene 'abbild': Gitter und Körper gehen stetig von der
+    Identität zur Abbildung über.
+
+    `matrix` ist 2×2 oder 3×3 (homogen, letzte Zeile 0 0 1); `punkte` sind die
+    Eckpunkte des Körpers als Paare (x, y), in Zeichenreihenfolge.
+    """
+    rows = [[float(c) for c in r] for r in matrix]
+    if len(rows) == 3 and rows[2] == [0.0, 0.0, 1.0]:
+        rows = rows[:2]                          # 2×3: A | t
+    elif len(rows) == 2 and len(rows[0]) == 2:
+        pass
+    else:
+        raise ValueError("Animiert werden nur Abbildungen der Ebene (2×2 oder "
+                         "homogen 3×3).")
+    pts = [[float(c) for c in p] for p in punkte]
+    if not pts or any(len(p) != 2 for p in pts):
+        raise ValueError("Die Punkte brauchen je zwei Koordinaten.")
+    return AnimationJob(
+        matrix=rows, vectors=pts, vector_note=note, scene="abbild",
+        title=title, theme=theme or Theme(), quality=quality, fmt=fmt)
+
+
 # --------------------------------------------------------------------------
 # Verfügbarkeit
 # --------------------------------------------------------------------------
 
+def engine() -> str:
+    """'manimgx' (schnell, bringt die Videoausgabe mit) wenn installiert,
+    sonst 'manim'. LIALKIT_ENGINE=manim erzwingt den Rückfall."""
+    forced = os.environ.get("LIALKIT_ENGINE")
+    if forced in ("manim", "manimgx"):
+        return forced
+    import importlib.util
+    return "manimgx" if importlib.util.find_spec("manimgx") else "manim"
+
+
 def manim_available() -> tuple[bool, str]:
-    """(verfügbar, Begründung) — prüft Manim und ffmpeg ohne Import-Fehler."""
+    """(verfügbar, Begründung) — prüft die Engine (bei Manim auch ffmpeg) ohne Import-Fehler."""
+    name = engine()
     try:
-        import manim  # noqa: F401
+        importlib.import_module(name)
     except ImportError:
-        return False, "Manim ist nicht installiert."
+        return False, "manimgx (oder Manim CE) ist nicht installiert."
     except Exception as exc:                       # defekte Installation
-        return False, f"Manim lässt sich nicht laden: {exc}"
-    if shutil.which("ffmpeg") is None:
+        return False, f"{name} lässt sich nicht laden: {exc}"
+    if name == "manim" and shutil.which("ffmpeg") is None:
         return False, "ffmpeg fehlt — nötig für die Videoausgabe."
     return True, ""
 
 
-INSTALL_HINT = ("brew install cairo pango pkg-config ffmpeg\n"
-                "pip install manim")
+INSTALL_HINT = ("pip install manimgx   # Rendering und Videoausgabe in einem Paket\n"
+                "(Rückfall: Manim CE mit brew install cairo pango pkg-config ffmpeg; pip install manim)")
+
+
+def _pick_font() -> str | None:
+    """Eine Helvetica-artige Schrift, die auf dem Rechner da ist (sonst der Standard der Engine)."""
+    if engine() == "manimgx":
+        return "Noto Sans"                         # bringt manimgx selbst mit
+    try:
+        import manimpango
+        have = set(manimpango.list_fonts())
+    except Exception:
+        return None
+    for name in ("Helvetica Neue", "Helvetica", "Arial", "Inter", "DejaVu Sans"):
+        if name in have:
+            return name
+    return None
 
 
 # --------------------------------------------------------------------------
 # Die Szenen
 # --------------------------------------------------------------------------
 
+def _swiss_text(Text):
+    """Text-Klasse, die die Helvetica-artige Schrift als Standard setzt."""
+    font = _pick_font()
+
+    def text(*args, **kw):
+        if font:
+            kw.setdefault("font", font)
+        return Text(*args, **kw)
+    return text
+
+
 def _build_scenes():
     """
     Erzeugt die Szenenklassen erst beim Aufruf, damit das Modul auch ohne
     installiertes Manim importierbar bleibt.
     """
-    from manim import (Scene, VGroup, VMobject, Text, Rectangle, FadeIn, FadeOut,
-                       FadeTransform, Transform, Write, config, DOWN, UP, ORIGIN)
+    mod = importlib.import_module(engine())
+    Scene, VGroup, VMobject, Rectangle, FadeIn, FadeOut, FadeTransform, \
+        Transform, Write, DOWN, UP, ORIGIN = (
+            getattr(mod, n) for n in (
+                "Scene VGroup VMobject Rectangle FadeIn FadeOut FadeTransform "
+                "Transform Write DOWN UP ORIGIN").split())
+    Text = _swiss_text(mod.Text)
 
     class MatrixBoard(VGroup):
         """Die erweiterte Matrix: Zellen, Klammern, Trennlinie."""
@@ -389,7 +476,7 @@ def _build_scenes():
         """Gemeinsame Grundlage: Auftrag laden, Grössen wählen, Beschriftung."""
 
         def setup(self):
-            self.job = AnimationJob.from_json(os.environ["GAUSS_JOB"])
+            self.job = AnimationJob.from_json(os.environ["LIALKIT_JOB"])
             self.theme = self.job.theme
             self.camera.background_color = self.theme.background
             cols = len(self.job.frames[0][0])
@@ -542,7 +629,8 @@ def _build_scenes():
             for index in range(len(self.job.frames) - 1):
                 pivot = self.job.pivots[index]
                 if pivot is not None:
-                    box = board.cell_box(pivot[0], pivot[1], self.theme.pivot)
+                    box = board.cell_box(pivot[0], pivot[1], self.theme.pivot,
+                                         opacity=0.2)
                     if marker is None:
                         marker = box
                         self.play(FadeIn(marker), run_time=0.3)
@@ -570,19 +658,23 @@ def _build_vector_scenes():
     sich langsam, weil erst die Bewegung zeigt, dass etwa u × v wirklich
     senkrecht auf beiden steht und nicht nur so gezeichnet ist.
     """
-    from manim import (Arrow3D, Create, DEGREES, DashedLine, FadeIn,
-                       Polygon, Text, ThreeDAxes, ThreeDScene, VGroup,
-                       VMobject, DOWN, UP, LEFT, ORIGIN)
+    mod = importlib.import_module(engine())
+    Arrow3D, Create, DEGREES, DashedLine, FadeIn, Polygon, ThreeDAxes, \
+        ThreeDScene, VGroup, VMobject, DOWN, UP, LEFT, ORIGIN = (
+            getattr(mod, n) for n in (
+                "Arrow3D Create DEGREES DashedLine FadeIn Polygon ThreeDAxes "
+                "ThreeDScene VGroup VMobject DOWN UP LEFT ORIGIN").split())
+    Text = _swiss_text(mod.Text)
     import numpy as np
 
     #: Farben der einzelnen Vektoren, in dieser Reihenfolge vergeben.
-    PALETTE = ["#0071e3", "#ff9f0a", "#30a14e", "#d70015"]
+    PALETTE = ["#000000", "#666666", "#e60000", "#999999"]
 
     class VectorScene(ThreeDScene):
         """Grundlage: Achsen, Vektoren, Beschriftung, Kamerafahrt."""
 
         def setup(self):
-            self.job = AnimationJob.from_json(os.environ["GAUSS_JOB"])
+            self.job = AnimationJob.from_json(os.environ["LIALKIT_JOB"])
             self.theme = self.job.theme
             self.camera.background_color = self.theme.background
             self.vecs = [np.array(v + [0.0] * (3 - len(v)), dtype=float)
@@ -607,6 +699,14 @@ def _build_vector_scenes():
                 z_length=self.unit * (self.span - lows[2]))
             self.axes.set_color(self.theme.muted)
             self.axes.set_stroke(width=2)
+
+        def pin(self, tag):
+            """Beschriftung, die der Kamera zugewandt bleibt. manimgx kennt
+            das nicht; dort steht sie fest im Raum."""
+            if hasattr(self, "add_fixed_orientation_mobjects"):
+                self.add_fixed_orientation_mobjects(tag)
+            else:
+                self.add(tag)
 
         def point(self, v) -> np.ndarray:
             """Rechnet einen Vektor in Zeichenkoordinaten um."""
@@ -668,7 +768,7 @@ def _build_vector_scenes():
             for i in range(count):
                 arrow = self.arrow(self.vecs[i], PALETTE[i])
                 tag = self.tag(self.names[i], self.vecs[i], PALETTE[i])
-                self.add_fixed_orientation_mobjects(tag)
+                self.pin(tag)
                 self.play(Create(arrow), FadeIn(tag), run_time=0.7)
                 drawn.append((arrow, tag))
             return drawn
@@ -723,7 +823,7 @@ def _build_vector_scenes():
             senk = self.vecs[2]
             pfeil = self.arrow(senk, PALETTE[2])
             tag = self.tag(self.names[2], senk, PALETTE[2])
-            self.add_fixed_orientation_mobjects(tag)
+            self.pin(tag)
             self.play(Create(pfeil), FadeIn(tag), run_time=1.0)
             self.turn(5.0)
 
@@ -773,7 +873,7 @@ def _build_vector_scenes():
             lot = DashedLine(self.point(self.vecs[0]), self.point(p),
                              color=self.theme.muted, stroke_width=3)
             tag = self.tag(self.names[2], p, PALETTE[2])
-            self.add_fixed_orientation_mobjects(tag)
+            self.pin(tag)
             self.play(Create(lot), run_time=0.8)
             self.play(Create(schatten), FadeIn(tag), run_time=0.8)
             self.turn(4.5)
@@ -783,10 +883,123 @@ def _build_vector_scenes():
             "vec_proj": ProjectionScene}
 
 
+def _build_map_scenes():
+    """
+    Die Szene »abbild«: Einheitsgitter und Körper verformen sich stetig von
+    der Identität zur Abbildung.
+
+    Weil A linear ist, ist die Zwischenstufe (1−t)·E + t·A wieder eine
+    Matrix; die Punkte wandern darum geradlinig von p nach A·p, und es genügt,
+    Anfangs- und Endbild ineinander zu überführen. Auch hier ohne LaTeX.
+    """
+    mod = importlib.import_module(engine())
+    Scene, VGroup, VMobject, Arrow, FadeIn, Transform, DOWN, UP, LEFT = (
+        getattr(mod, n) for n in (
+            "Scene VGroup VMobject Arrow FadeIn Transform DOWN UP LEFT".split()))
+    Text = _swiss_text(mod.Text)
+    import math
+    import numpy as np
+
+    class AbbildScene(Scene):
+        """Gitter, Basisvektoren und Körper gehen von E zu A über."""
+
+        def setup(self):
+            self.job = AnimationJob.from_json(os.environ["LIALKIT_JOB"])
+            self.theme = self.job.theme
+            self.camera.background_color = self.theme.background
+
+        def construct(self):
+            th, job = self.theme, self.job
+            M = np.array(job.matrix, dtype=float)
+            A = M[:, :2]
+            t = M[:, 2] if M.shape[1] == 3 else np.zeros(2)
+            P = np.array(job.vectors, dtype=float).T            # 2×n
+            bild = A @ P + t[:, None]
+            ecken = np.hstack([P, bild, np.zeros((2, 1)), np.eye(2), A + t[:, None]])
+            low, high = ecken.min(axis=1), ecken.max(axis=1)
+            weite = np.maximum(high - low, 1.0)
+            u = min(11.0 / weite[0], 5.0 / weite[1])            # Zeichenlänge je Einheit
+            mitte = (low + high) / 2
+            versatz = np.array([0.0, -0.5])
+
+            def pt(x, y):
+                return np.array([(x - mitte[0]) * u + versatz[0],
+                                 (y - mitte[1]) * u + versatz[1], 0.0])
+
+            def linie(punkte, farbe, breite, deckkraft=1.0, schluss=False):
+                pts = [pt(*p) for p in punkte]
+                if schluss:
+                    pts.append(pts[0])
+                m = VMobject(color=farbe, stroke_width=breite,
+                             stroke_opacity=deckkraft)
+                m.set_points_as_corners(pts)
+                return m
+
+            spanne = float(max(abs(ecken).max(), 1.0))
+            schritt = next(s for s in (1, 2, 5, 10, 20, 50, 100, 1e3, 1e4)
+                           if spanne / s <= 6)
+            n = int(min(15, math.ceil(2.2 * spanne / schritt)))
+            rand = n * schritt
+
+            def gitter(f, farbe, breite, deckkraft):
+                g = VGroup()
+                for i in range(-n, n + 1):
+                    w = i * schritt
+                    for a, b in (((w, -rand), (w, rand)), ((-rand, w), (rand, w))):
+                        g.add(linie([f(*a), f(*b)], farbe,
+                                    breite * (2 if i == 0 else 1),
+                                    1.0 if i == 0 else deckkraft))
+                return g
+
+            ident = lambda x, y: (x, y)                          # noqa: E731
+            wirkung = lambda x, y: tuple(A @ np.array([x, y]) + t)   # noqa: E731
+            start = gitter(ident, th.muted, 1.4, 0.45)
+            ziel = gitter(wirkung, th.muted, 1.4, 0.45)
+            koerper_0 = linie(P.T, th.accent, 5, schluss=True)
+            koerper = linie(P.T, th.text, 4, schluss=True)
+            koerper_1 = linie(bild.T, th.text, 4, schluss=True)
+
+            kopf = VGroup(Text("Lineare Abbildung  x \u21a6 A \u00b7 x", font_size=30,
+                               color=th.text))
+            if job.vector_note:
+                kopf.add(Text(job.vector_note, font_size=22, color=th.muted))
+            kopf.arrange(DOWN, buff=0.18, aligned_edge=LEFT)
+            kopf.to_corner(UP + LEFT, buff=0.5)
+            legende = VGroup(
+                Text("Original", font_size=22, color=th.accent),
+                Text("Bild", font_size=22, color=th.text))
+            legende.arrange(DOWN, buff=0.12, aligned_edge=LEFT)
+            legende.to_corner(UP + mod.RIGHT, buff=0.5)
+
+            # Basisvektoren: e1, e2 gehen in die Spalten von A (ohne die
+            # Verschiebung) über. Entartete Bilder (Länge 0) bleiben weg.
+            pfeile0, pfeile1 = VGroup(), VGroup()
+            for k in range(2):
+                ende = A[:, k] + t
+                if np.linalg.norm(A[:, k]) > 1e-6:
+                    pfeile0.add(Arrow(pt(0, 0), pt(*np.eye(2)[k]),
+                                      buff=0, color=th.accent, stroke_width=6))
+                    pfeile1.add(Arrow(pt(*t), pt(*ende), buff=0,
+                                      color=th.accent, stroke_width=6))
+
+            self.play(FadeIn(start), FadeIn(koerper_0), FadeIn(kopf), FadeIn(legende),
+                      run_time=1.0)
+            self.add(koerper)
+            if len(pfeile0):
+                self.play(FadeIn(pfeile0), run_time=0.5)
+            self.wait(0.6)
+            self.play(Transform(start, ziel), Transform(koerper, koerper_1),
+                      *( [Transform(pfeile0, pfeile1)] if len(pfeile0) else [] ),
+                      run_time=3.2)
+            self.wait(1.8)
+
+    return {"abbild": AbbildScene}
+
+
 SCENE_NAMES = {"step": "StepScene", "full": "FullScene", "pivots": "PivotScene",
                "vec_dot": "DotScene", "vec_cross": "CrossScene",
                "vec_spat": "SpatScene", "vec_angle": "AngleScene",
-               "vec_proj": "ProjectionScene"}
+               "vec_proj": "ProjectionScene", "abbild": "AbbildScene"}
 
 
 # --------------------------------------------------------------------------
@@ -794,49 +1007,63 @@ SCENE_NAMES = {"step": "StepScene", "full": "FullScene", "pivots": "PivotScene",
 # --------------------------------------------------------------------------
 
 #: Wird vom Kindprozess ausgeführt. Lädt den Auftrag aus der Umgebung.
-#: Manim sucht Szenenklassen nur in diesem Modul, darum wird __module__
+#: Die Engine sucht Szenenklassen nur in diesem Modul, darum wird __module__
 #: der hier erzeugten Klassen umgehängt.
 _RUNNER = '''
-import os, sys
-sys.path.insert(0, {app_dir!r})
-from gauss_anim import SCENE_NAMES
+import importlib, importlib.util, os, sys
+# Der Ordner ist das Paket, auch wenn er nicht so heisst.
+if {pkg!r} not in sys.modules:
+    _spec = importlib.util.spec_from_file_location(
+        {pkg!r}, os.path.join({here!r}, "__init__.py"),
+        submodule_search_locations=[{here!r}])
+    _p = importlib.util.module_from_spec(_spec)
+    sys.modules[{pkg!r}] = _p
+    _spec.loader.exec_module(_p)
+_mod = importlib.import_module({pkg!r} + ".grafik.anim")
 
-if {vectors!r}:
-    from gauss_anim import _build_vector_scenes as _build
-else:
-    from gauss_anim import _build_scenes as _build
-
-# Die Klassen entstehen erst zur Laufzeit; Manim sucht sie aber als
-# Modulinhalt. Darum hier unter ihrem Namen ablegen und das Modul umbiegen.
+_build = getattr(_mod, {builder!r})
 for _key, _cls in _build().items():
     _cls.__module__ = __name__
-    globals()[SCENE_NAMES[_key]] = _cls
+    globals()[_mod.SCENE_NAMES[_key]] = _cls
 '''
+
+#: Welche Funktion die Szene baut; alles andere kommt aus _build_scenes.
+_BUILDERS = {"abbild": "_build_map_scenes",
+             **{k: "_build_vector_scenes" for k in SCENE_NAMES if k.startswith("vec_")}}
 
 _PROGRESS = re.compile(r"(\d+)\s*%")
 
 
+def _package() -> tuple[str, str]:
+    """(Name des Pakets, Ordner, der es enthält) — damit der Kindprozess es importieren kann."""
+    here = Path(__file__).resolve().parent.parent
+    return (__package__ or here.name).split(".")[0], str(here.parent)
+
+
 def render(job: AnimationJob, *, progress: Callable[[int, str], None] | None = None,
            out_dir: str | Path | None = None,
-           timeout: float = 300) -> Path:
+           timeout: float = 600) -> Path:
     """
     Rendert den Auftrag und gibt den Pfad der fertigen Datei zurück.
 
-    Manim läuft in einem eigenen Prozess: Es schreibt viel in globale
-    Konfiguration und lässt sich im selben Prozess nicht sauber mehrfach
-    starten. progress bekommt (Prozent, Text).
+    Die Engine (manimgx, sonst Manim CE) läuft in einem eigenen Prozess: Sie
+    schreibt viel in globale Konfiguration und lässt sich im selben Prozess
+    nicht sauber mehrfach starten. progress bekommt (Prozent, Text). Fehlt
+    die Engine, gibt es einen RuntimeError mit Installationshinweis.
     """
     ok, why = manim_available()
     if not ok:
-        raise RuntimeError(why)
+        raise RuntimeError(f"{why}\nInstallation:\n{INSTALL_HINT}")
+    if job.scene not in SCENE_NAMES:
+        raise ValueError(f"Unbekannte Szene {job.scene!r}")
 
-    app_dir = str(Path(__file__).resolve().parent)
-    work = Path(out_dir) if out_dir else Path(tempfile.mkdtemp(prefix="gauss-anim-"))
+    pkg, root = _package()
+    work = Path(out_dir) if out_dir else Path(tempfile.mkdtemp(prefix="lialkit-anim-"))
     work.mkdir(parents=True, exist_ok=True)
     script = work / "scene_runner.py"
     script.write_text(
-        _RUNNER.format(app_dir=app_dir,
-                       vectors=job.scene.startswith("vec_")),
+        _RUNNER.format(pkg=pkg, here=str(Path(__file__).resolve().parent.parent),
+                       builder=_BUILDERS.get(job.scene, "_build_scenes")),
         encoding="utf-8")
 
     folder, flag = QUALITIES.get(job.quality, QUALITIES["low"])
@@ -844,62 +1071,79 @@ def render(job: AnimationJob, *, progress: Callable[[int, str], None] | None = N
     # Immer MP4 rendern. Manims eigener GIF-Export erzeugt eine fehlerhafte
     # Palette (schwarze Schrift wird gelb); das GIF entsteht darum unten in
     # einem zweiten Schritt mit palettegen.
-    cmd = [sys.executable, "-m", "manim", flag, "--disable_caching",
-           "--media_dir", str(work / "media"), "-o", "gauss",
-           str(script), name]
+    if engine() == "manimgx":
+        size, fps = folder.split("p")
+        res = {"480": "854x480", "720": "1280x720", "1080": "1920x1080",
+               "1440": "2560x1440"}[size]
+        out = work / "media" / "lialkit.mp4"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [sys.executable, "-m", "manimgx", "render", str(script), name,
+               "-o", str(out), "-r", res, "--fps", fps]
+    else:
+        cmd = [sys.executable, "-m", "manim", flag, "--disable_caching",
+               "--media_dir", str(work / "media"), "-o", "lialkit",
+               str(script), name]
 
     env = dict(os.environ)
-    env["GAUSS_JOB"] = job.to_json()
-    env["PYTHONPATH"] = app_dir + os.pathsep + env.get("PYTHONPATH", "")
+    env["LIALKIT_JOB"] = job.to_json()
+    env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
 
     if progress:
-        progress(2, "Manim startet …")
+        progress(2, "Animation startet …")
 
     process = subprocess.Popen(cmd, cwd=str(work), env=env, text=True,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                bufsize=1)
-    # Manim zählt je Animation von 0 bis 100. Für einen Balken, der nicht
+    # Die Engine zählt je Animation von 0 bis 100. Für einen Balken, der nicht
     # zurückspringt, zählen wir die abgeschlossenen Animationen mit.
     # Die Vektorszenen haben keine Bilderfolge; dort ist die Zahl der
     # Teilanimationen ungefähr fest.
-    expected = 9 if job.scene.startswith("vec_") else max(1, len(job.frames) * 3)
+    expected = (9 if job.scene.startswith("vec_") else 4 if job.scene == "abbild"
+                else max(1, len(job.frames) * 3))
     log: list[str] = []
-    done = 0
-    last = 0
+    done = last = 0
+    timed_out = threading.Event()
+
+    def stop():
+        timed_out.set()
+        process.kill()
+
+    timer = threading.Timer(timeout, stop)
+    timer.start()
     try:
         for line in process.stdout:
             log.append(line)
-            match = _PROGRESS.search(line)
-            if match and progress:
+            for match in _PROGRESS.finditer(line):
                 within = int(match.group(1))
                 if within >= 100:
                     done += 1
                 overall = min(97, int((done + within / 100) / expected * 95) + 3)
-                if overall > last:
+                if overall > last and progress:
                     last = overall
                     progress(overall, "Rendere …")
-        process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        process.kill()
+        process.wait()
+    finally:
+        timer.cancel()
+    if timed_out.is_set():
         raise RuntimeError("Das Rendern hat zu lange gedauert.")
 
     output = "".join(log)
-    # Manim meldet manche Fehler nur im Text und beendet trotzdem mit 0.
-    if process.returncode != 0 or "ERROR" in output:
+    # Manche Fehler stehen nur im Text, der Prozess endet trotzdem mit 0.
+    if process.returncode != 0 or "Traceback" in output:
         lines = [l.rstrip() for l in log if l.strip()]
-        tail = "\n".join(lines[-10:]) or "Keine Ausgabe."
-        raise RuntimeError(f"Manim ist fehlgeschlagen:\n{tail}")
+        tail = "\n".join(lines[-12:]) or "Keine Ausgabe."
+        raise RuntimeError(f"Das Rendern ist fehlgeschlagen:\n{tail}")
 
-    candidates = sorted((work / "media").rglob("gauss*.mp4"),
+    candidates = sorted((work / "media").rglob("lialkit*.mp4"),
                         key=lambda p: p.stat().st_mtime, reverse=True)
     if not candidates:
-        raise RuntimeError("Manim hat keine Datei erzeugt.")
+        raise RuntimeError("Es wurde keine Datei erzeugt.")
     video = candidates[0]
 
     if job.fmt == "gif":
         if progress:
             progress(98, "Erzeuge GIF …")
-        video = to_gif(video, work / "gauss.gif",
+        video = to_gif(video, work / "lialkit.gif",
                        width=job.gif_width, fps=job.gif_fps)
     if progress:
         progress(100, "Fertig.")
@@ -915,6 +1159,8 @@ def to_gif(video: Path, target: Path, *, width: int = 760, fps: int = 15) -> Pat
     Hochskaliert wird nie: ist das Video schmaler als `width`, bleibt es so,
     sonst wäre das Ergebnis nur unscharf aufgeblasen.
     """
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError("ffmpeg fehlt — nötig für die GIF-Ausgabe.")
     chain = (f"fps={fps},scale='min({width},iw)':-1:flags=lanczos,"
              f"split[s0][s1];[s0]palettegen=stats_mode=diff[p];"
              f"[s1][p]paletteuse=dither=bayer:bayer_scale=3")
@@ -957,12 +1203,22 @@ def _demo_job(scene: str = "full") -> AnimationJob:
         solution=["x1 = 2", "x2 = 3", "x3 = −1"], scene=scene)
 
 
-if __name__ == "__main__":
-    scene = sys.argv[1] if len(sys.argv) > 1 else "full"
+def _demo(argv: list[str]) -> int:
+    scene = argv[0] if argv else "full"
     ok, why = manim_available()
     if not ok:
         print(why)
         print(INSTALL_HINT)
-        sys.exit(1)
+        return 1
     path = render(_demo_job(scene), progress=lambda p, t: print(f"{p:3d}%  {t}"))
     print("Fertig:", path)
+    return 0
+
+
+if __name__ == "__main__":
+    if not __package__:
+        # Direkt gestartet: das Paket über seinen Ordner importierbar machen.
+        _here = Path(__file__).resolve().parent.parent
+        sys.path.insert(0, str(_here.parent))
+        sys.exit(importlib.import_module(_here.name + ".grafik.anim")._demo(sys.argv[1:]))
+    sys.exit(_demo(sys.argv[1:]))
