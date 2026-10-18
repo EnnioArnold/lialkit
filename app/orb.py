@@ -27,7 +27,7 @@ class ThinkingOrb(QWidget):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.phase = 0.0
-        self.colors: list[QColor] = [QColor("#0070f3"), QColor("#171717"),
+        self.colors: list[QColor] = [QColor("#e60000"), QColor("#000000"),
                                      QColor("#666666")]
         self.timer = QTimer(self)
         self.timer.setInterval(33)  # ~30 fps
@@ -70,9 +70,10 @@ class ThinkingOrb(QWidget):
                 else:
                     path.lineTo(point)
             band = QColor(color)
-            band.setAlphaF(0.95 - 0.25 * i)
+            band.setAlphaF(1.0)
             pen = QPen(band, max(2.0, size * 0.09))
-            pen.setCapStyle(Qt.RoundCap)
+            pen.setCapStyle(Qt.FlatCap)   # Swiss: eckige Enden
+            pen.setJoinStyle(Qt.MiterJoin)
             p.setPen(pen)
             p.drawPath(path)
         p.end()

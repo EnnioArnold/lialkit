@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Die Übungsaufgaben aus den Semesterwochen 1 bis 4.
+Die Übungsaufgaben aus den Semesterwochen 1 bis 5.
 
 Die Aufgaben stehen hier als Daten, nicht als fertige Antworten. Du holst
 dir eine Aufgabe, rechnest selbst und vergleichst — das ist der Zweck.
@@ -18,7 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .core import Matrix, Vector
+from ..rechnen.abbildung import BUCHSTABE_F_AUFGABE, EINHEITSQUADRAT, PHI_REIHE
+from ..rechnen.core import Matrix, Vector
 
 
 @dataclass
@@ -50,7 +51,7 @@ class Exercise:
         rows = []
         for name, value in self.data.items():
             if isinstance(value, (Matrix, Vector)):
-                from .render import tex_any
+                from ..rechnen.render import tex_any
                 rows.append(f"<div>$$ {name} = {tex_any(value)} $$</div>")
             else:
                 rows.append(f"<div>{html.escape(name)} = "
@@ -212,6 +213,41 @@ _add(Exercise(
     "Aus A·A⁻¹ = E folgt det(A)·det(A⁻¹) = 1."))
 
 
+# -- Semesterwoche 5: Lineare Abbildungen ----------------------------------
+# Die Bilder des Einheitsquadrats (Ecken (0,0), (1,0), (1,1), (0,1), (0,0))
+# gibt das Blatt nur als Zeichnung; hier stehen sie so, wie sie aus den
+# Matrizen der Musterlösung folgen. Das Vektorprodukt (Lernziel SW 5) liegt
+# in lialkit.vectors: cross(u, v).
+
+_SW5_1 = {
+    "a": ([[0, 2, 2, 0, 0], [0, 0, 2, 2, 0]], "Gestreckt um den Faktor 2."),
+    "b": ([[0, 1, 1, 0, 0], [0, 0, 2, 2, 0]], "Nur in y-Richtung gestreckt."),
+    "c": ([[0, 1, 2, 1, 0], [0, 0, 2, 2, 0]], "Ein Parallelogramm mit Ecke im Ursprung."),
+    "d": ([[1, 2, 1, 0, 1], [0, 0, 2, 2, 0]],
+          "Der Nullpunkt liegt nicht mehr im Ursprung — geht es mit "
+          "homogenen Koordinaten?"),
+    "e": ([[1, 2, 1, 0, 1], [0, 2, 3, 1, 0]],
+          "Der Nullpunkt liegt nicht mehr im Ursprung — geht es mit "
+          "homogenen Koordinaten?"),
+}
+for _key, (_rows, _note) in _SW5_1.items():
+    _add(Exercise(
+        f"SW5.1{_key}", "SW5", f"Einfache lineare Abbildung ({_key})",
+        "Gibt es eine lineare Abbildung, die das Einheitsquadrat in die "
+        "Figur Q abbildet? Matrix angeben oder begründen, warum nicht.",
+        {"P": _m(EINHEITSQUADRAT.rows), "Q": _m(_rows)}, "abbildung",
+        _note))
+
+for _key, _rule in (("a", "Rot(φ)·(F + T)"), ("b", "F + Rot(φ)·T")):
+    _add(Exercise(
+        f"SW5.2{_key}", "SW5", f"Zusammengesetzte Abbildungen, Plot {_key})",
+        f"Rotationsmatrix Rot(φ) schreiben und damit F für φ = 0°, 30°, …, "
+        f"330° als {_rule} zeichnen.",
+        {"F": BUCHSTABE_F_AUFGABE, "T": Vector([15, 0]),
+         "phi": list(PHI_REIHE)}, f"rotationsreihe_{_key}",
+        "Zeichnen: plot_rotationsreihe(variante)."))
+
+
 # ==========================================================================
 # Zugriff
 # ==========================================================================
@@ -240,11 +276,11 @@ def loese(key: str, weg: bool = True, decimal: bool = False):
     Gedacht zum Kontrollieren, nachdem du selbst gerechnet hast — der
     Rechenweg ist dieselbe Abfolge, die auf dem Papier stünde.
     """
-    from .factor import lu, solve_lu
-    from .inverse import inverse
-    from .determinant import det
-    from .solving import gauss_jordan
-    from .vectors import Line, Plane, angle, cross, dot
+    from ..rechnen.factor import lu, solve_lu
+    from ..rechnen.inverse import inverse
+    from ..rechnen.determinant import det
+    from ..rechnen.solving import gauss_jordan
+    from ..rechnen.vectors import Line, Plane, angle, cross, dot
 
     ex = aufgabe(key)
     data = ex.data
@@ -272,7 +308,7 @@ def loese(key: str, weg: bool = True, decimal: bool = False):
         return Plane(point, u=u, v=v).intersect_line(g, decimal=decimal)
 
     if ex.method == "vectors":
-        from .render import Result, Step
+        from ..rechnen.render import Result, Step
         u, v = data["u"], data["v"]
         out = Result(decimal)
         out.title = ex.title
@@ -292,6 +328,15 @@ def loese(key: str, weg: bool = True, decimal: bool = False):
     if ex.method in ("det_scale", "det_negate", "det_inverse"):
         return _det_property(ex, decimal)
 
+    if ex.method == "abbildung":
+        from ..rechnen.abbildung import finde_abbildung
+        return finde_abbildung(data["Q"], decimal=decimal)
+
+    if ex.method.startswith("rotationsreihe_"):
+        from ..rechnen.abbildung import rotationsreihe
+        return rotationsreihe(ex.method[-1], data["F"], data["T"],
+                              data["phi"], decimal=True)
+
     if ex.method == "program":
         raise ValueError(
             "Diese Aufgabe sollst du selbst programmieren. Das Gerüst mit "
@@ -303,9 +348,9 @@ def loese(key: str, weg: bool = True, decimal: bool = False):
 
 def _det_property(ex: Exercise, decimal: bool):
     """Die drei Determinanten-Eigenschaften aus SW4 am Beispiel."""
-    from .determinant import det
-    from .inverse import inverse
-    from .render import Result, Step
+    from ..rechnen.determinant import det
+    from ..rechnen.inverse import inverse
+    from ..rechnen.render import Result, Step
 
     out = Result(decimal)
     out.title = ex.title
