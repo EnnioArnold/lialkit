@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 from typing import Sequence
 
-from .core import Matrix, Vector, fmt
+from ..rechnen.core import Matrix, Vector, fmt
 
 # Dieselbe Farbfolge wie in der Qt-App, damit Fenster und Notebook
 # zusammengehören.
@@ -406,7 +406,7 @@ def plot_transformation(A, title: str = "", grid: int = 5):
     Vorzeichen sagt, ob die Orientierung kippt.
     """
     import matplotlib.pyplot as plt
-    from .determinant import det
+    from ..rechnen.determinant import det
 
     A = A if isinstance(A, Matrix) else Matrix(A)
     if A.m != 2 or A.n != 2:
