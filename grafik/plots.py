@@ -3,21 +3,60 @@
 Zeichnen: Vektoren, Geraden, Ebenen und Spate.
 
 Flaches mit Matplotlib — das passt zu euren Notebooks und lässt sich
-drucken. Räumliches zusätzlich mit Plotly, weil ein Spat erst verständlich
+drucken. Gestaltung im Swiss Style wie die App: Schwarz/Weiss, ein rotes
+Akzentrot, keine Rundungen, schlichte Linien, Helvetica-artige Schrift. Räumliches zusätzlich mit Plotly, weil ein Spat erst verständlich
 wird, wenn man ihn drehen kann. Fehlt Plotly, fällt alles auf Matplotlib
 zurück, statt abzubrechen.
 """
 
 from __future__ import annotations
 
+import functools
 import math
 from typing import Sequence
 
-from .core import Matrix, Vector, fmt
+from ..rechnen.core import Matrix, Vector, fmt
 
-# Dieselbe Farbfolge wie in der Qt-App, damit Fenster und Notebook
-# zusammengehören.
-COLORS = ["#0071e3", "#ff9500", "#248a3d", "#d70015", "#8944ab", "#00a2a8"]
+# Swiss Style wie die App: Schwarz/Weiss, ein Rot (#e60000), Grautöne.
+INK = "#000000"
+RED = "#e60000"
+GREY = "#666666"
+LIGHT = "#d9d9d9"
+COLORS = [INK, RED, GREY, "#999999", "#333333", "#b30000"]
+
+_FONTS = ["Helvetica Neue", "Helvetica", "Arial", "Liberation Sans",
+          "DejaVu Sans"]
+_RC = {
+    "font.family": "sans-serif", "font.sans-serif": _FONTS,
+    "font.size": 10.5, "axes.titlesize": 12, "axes.unicode_minus": True,
+    "figure.facecolor": "#ffffff", "axes.facecolor": "#ffffff",
+    "savefig.facecolor": "#ffffff", "text.color": INK,
+    "axes.labelcolor": INK, "axes.edgecolor": INK,
+    "xtick.color": "#333333", "ytick.color": "#333333",
+    "grid.color": "#e0e0e0", "grid.linewidth": 0.6,
+    "lines.solid_capstyle": "butt", "lines.solid_joinstyle": "miter",
+    "lines.dash_capstyle": "butt", "patch.linewidth": 1.0,
+    "legend.frameon": False, "mathtext.fontset": "dejavusans",
+}
+_PLOTLY_FONT = dict(family="Helvetica Neue, Helvetica, Arial, sans-serif",
+                    color=INK)
+
+
+def _swiss(fn):
+    """Zeichenfunktion im Swiss-Design-Stil (rc_context) ausführen."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        import matplotlib.pyplot as plt
+        with plt.rc_context(_RC):
+            return fn(*args, **kwargs)
+    return wrapper
+
+
+def _plotly_layout(figure, title, height):
+    figure.update_layout(
+        title=title or None, template="simple_white", height=height,
+        font=_PLOTLY_FONT, paper_bgcolor="#ffffff",
+        margin=dict(l=0, r=0, t=40 if title else 10, b=0))
 
 
 def _vec(v) -> Vector:
@@ -74,21 +113,34 @@ def _apply_limits_mpl(ax, lims):
 
 def _scene_axes(lims):
     """Plotly: Achsenbereiche ab 0, gleiche Massstäbe."""
+    ax = dict(gridcolor="#e0e0e0", zerolinecolor=INK, linecolor=INK,
+              backgroundcolor="#ffffff", showbackground=False)
     return dict(aspectmode="data",
-                xaxis=dict(title="x", range=list(lims[0])),
-                yaxis=dict(title="y", range=list(lims[1])),
-                zaxis=dict(title="z", range=list(lims[2])))
+                xaxis=dict(title="x", range=list(lims[0]), **ax),
+                yaxis=dict(title="y", range=list(lims[1]), **ax),
+                zaxis=dict(title="z", range=list(lims[2]), **ax))
+
+
+def _style_3d(ax, title: str = ""):
+    """Matplotlib-3D: weisse Wände, feine graue Gitterlinien, keine Füllung."""
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axis.pane.set_facecolor((1, 1, 1, 0))
+        axis.pane.set_edgecolor(LIGHT)
+        axis._axinfo["grid"].update(color="#e0e0e0", linewidth=0.6)
+    _style_3d(ax, title)
 
 
 def _style_2d(ax, title: str = ""):
     ax.set_aspect("equal", adjustable="box")
-    ax.grid(True, color="#d2d2d7", linewidth=0.6, alpha=0.7)
-    ax.axhline(0, color="#86868b", linewidth=1)
-    ax.axvline(0, color="#86868b", linewidth=1)
+    ax.grid(True, color="#e0e0e0", linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.axhline(0, color=INK, linewidth=1)
+    ax.axvline(0, color=INK, linewidth=1)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
     for side in ("left", "bottom"):
-        ax.spines[side].set_color("#d2d2d7")
+        ax.spines[side].set_color(INK)
+    ax.tick_params(length=3)
     if title:
         ax.set_title(title, fontsize=12, loc="left", pad=12)
 
@@ -139,6 +191,7 @@ def plot_vectors(*vectors, labels: Sequence[str] | None = None,
     return _plot_vectors_mpl(vecs, origins, labels, title, dim, chain, size)
 
 
+@_swiss
 def _plot_vectors_mpl(vecs, origins, labels, title, dim, chain, size):
     import matplotlib.pyplot as plt
 
@@ -149,16 +202,17 @@ def _plot_vectors_mpl(vecs, origins, labels, title, dim, chain, size):
             dx, dy = _floats(v)
             color = COLORS[i % len(COLORS)]
             ax.annotate("", xy=(x0 + dx, y0 + dy), xytext=(x0, y0),
-                        arrowprops=dict(arrowstyle="-|>", color=color, lw=2.2,
-                                        shrinkA=0, shrinkB=0))
+                        arrowprops=dict(arrowstyle="-|>", color=color, lw=2,
+                                        shrinkA=0, shrinkB=0,
+                                        joinstyle="miter", capstyle="butt"))
             ax.text(x0 + dx / 2, y0 + dy / 2, f"  {labels[i]}", color=color,
-                    fontsize=11, fontweight="demibold")
+                    fontsize=11, fontweight="bold")
         if chain:
             total = _floats(origins[-1] + vecs[-1])
             ax.annotate("", xy=tuple(total), xytext=(0, 0),
-                        arrowprops=dict(arrowstyle="-|>", color="#86868b",
+                        arrowprops=dict(arrowstyle="-|>", color=GREY,
                                         lw=2, ls="--", shrinkA=0, shrinkB=0))
-            ax.text(total[0] / 2, total[1] / 2, "  Summe", color="#86868b",
+            ax.text(total[0] / 2, total[1] / 2, "  Summe", color=GREY,
                     fontsize=10)
         points = [[0.0, 0.0]] + [_floats(o + v) for o, v in zip(origins, vecs)] \
                  + [_floats(o) for o in origins]
@@ -179,16 +233,12 @@ def _plot_vectors_mpl(vecs, origins, labels, title, dim, chain, size):
         dx, dy, dz = _floats(v)
         color = COLORS[i % len(COLORS)]
         ax.quiver(x0, y0, z0, dx, dy, dz, color=color, arrow_length_ratio=0.12,
-                  linewidth=2.2)
+                  linewidth=2)
         ax.text(x0 + dx, y0 + dy, z0 + dz, f"  {labels[i]}", color=color,
                 fontsize=10)
     all_pts = [[0.0, 0.0, 0.0]] + [_floats(o + v) for o, v in zip(origins, vecs)]
     _apply_limits_mpl(ax, _limits(all_pts))
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    if title:
-        ax.set_title(title, fontsize=12, loc="left")
+    _style_3d(ax, title)
     fig.tight_layout()
     return _finish(fig)
 
@@ -211,10 +261,8 @@ def _plot_vectors_plotly(vecs, origins, labels, title, chain):
     pts = [[0.0, 0.0, 0.0]] + [_floats(o + v) for o, v in zip(origins, vecs)] \
           + [_floats(o) for o in origins]
     figure = go.Figure(data=data)
-    figure.update_layout(
-        title=title or None, template="plotly_white", height=560,
-        margin=dict(l=0, r=0, t=40 if title else 10, b=0),
-        scene=_scene_axes(_limits(pts)))
+    _plotly_layout(figure, title, 560)
+    figure.update_layout(scene=_scene_axes(_limits(pts)))
     return figure
 
 
@@ -222,6 +270,7 @@ def _plot_vectors_plotly(vecs, origins, labels, title, chain):
 # Spat
 # ==========================================================================
 
+@_swiss
 def plot_spat(u, v, w, title: str = "", interactive: bool | None = None,
               labels: Sequence[str] | None = None):
     """
@@ -254,7 +303,7 @@ def plot_spat(u, v, w, title: str = "", interactive: bool | None = None,
                 x=[corners[a][0], corners[b][0]],
                 y=[corners[a][1], corners[b][1]],
                 z=[corners[a][2], corners[b][2]],
-                mode="lines", line=dict(color="#86868b", width=3),
+                mode="lines", line=dict(color=GREY, width=3),
                 showlegend=False, hoverinfo="skip"))
         for i, (vec, name) in enumerate(zip((u, v, w), names)):
             dx, dy, dz = _floats(vec)
@@ -265,13 +314,11 @@ def plot_spat(u, v, w, title: str = "", interactive: bool | None = None,
                                      name=name))
         data.append(go.Mesh3d(
             x=[c[0] for c in corners], y=[c[1] for c in corners],
-            z=[c[2] for c in corners], alphahull=0, opacity=0.18,
-            color="#0071e3", hoverinfo="skip", showlegend=False))
+            z=[c[2] for c in corners], alphahull=0, opacity=0.12,
+            color=RED, hoverinfo="skip", showlegend=False))
         figure = go.Figure(data=data)
-        figure.update_layout(
-            title=title or None, template="plotly_white", height=580,
-            margin=dict(l=0, r=0, t=40 if title else 10, b=0),
-            scene=_scene_axes(_limits(corners)))
+        _plotly_layout(figure, title, 580)
+        figure.update_layout(scene=_scene_axes(_limits(corners)))
         return figure
 
     import matplotlib.pyplot as plt
@@ -279,18 +326,14 @@ def plot_spat(u, v, w, title: str = "", interactive: bool | None = None,
     fig = plt.figure(figsize=(6.5, 5.5))
     ax = fig.add_subplot(111, projection="3d")
     for a, b in edges:
-        ax.plot(*zip(corners[a], corners[b]), color="#86868b", linewidth=1.2)
+        ax.plot(*zip(corners[a], corners[b]), color=GREY, linewidth=1.2)
     for i, (vec, name) in enumerate(zip((u, v, w), names)):
         dx, dy, dz = _floats(vec)
         ax.quiver(0, 0, 0, dx, dy, dz, color=COLORS[i],
                   arrow_length_ratio=0.12, linewidth=2.4)
         ax.text(dx, dy, dz, f"  {name}", color=COLORS[i], fontsize=11)
     _apply_limits_mpl(ax, _limits(corners))
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    if title:
-        ax.set_title(title, fontsize=12, loc="left")
+    _style_3d(ax, title)
     fig.tight_layout()
     return _finish(fig)
 
@@ -299,6 +342,7 @@ def plot_spat(u, v, w, title: str = "", interactive: bool | None = None,
 # Geraden und Ebenen
 # ==========================================================================
 
+@_swiss
 def plot_line(line, span=(-3, 3), title: str = "", ax=None):
     """Zeichnet eine Gerade in Parameterform."""
     import matplotlib.pyplot as plt
@@ -314,15 +358,16 @@ def plot_line(line, span=(-3, 3), title: str = "", ax=None):
                 color=COLORS[0], linewidth=2)
         px, py = _floats(line.p)
         dx, dy = _floats(line.d)
-        ax.plot([px], [py], "o", color=COLORS[3], markersize=7)
+        ax.plot([px], [py], "s", color=RED, markersize=6)
         ax.annotate("", xy=(px + dx, py + dy), xytext=(px, py),
-                    arrowprops=dict(arrowstyle="-|>", color=COLORS[3], lw=2))
+                    arrowprops=dict(arrowstyle="-|>", color=RED, lw=2))
         _style_2d(ax, title)
         fig.tight_layout()
         return _finish(fig)
     raise ValueError("Für räumliche Geraden plot_vectors oder plot_plane nutzen")
 
 
+@_swiss
 def plot_plane(plane, span=(-2, 2), points=None, title: str = "",
                interactive: bool | None = None):
     """
@@ -348,25 +393,23 @@ def plot_plane(plane, span=(-2, 2), points=None, title: str = "",
             y=[[p[1] for p in row] for row in surface],
             z=[[p[2] for p in row] for row in surface],
             opacity=0.55, showscale=False,
-            colorscale=[[0, "#cfe3fb"], [1, "#0071e3"]], name="Ebene")]
+            colorscale=[[0, "#e0e0e0"], [1, "#999999"]], name="Ebene")]
         px, py, pz = _floats(plane.p)
         nx, ny, nz = _floats(plane.n.normalized()
                              if not plane.n.is_zero() else plane.n)
         data.append(go.Scatter3d(x=[px, px + nx], y=[py, py + ny],
                                  z=[pz, pz + nz], mode="lines",
-                                 line=dict(color=COLORS[3], width=7),
+                                 line=dict(color=RED, width=7),
                                  name="Normale n"))
         for i, pt in enumerate(points or []):
             q = _floats(_vec(pt))
             data.append(go.Scatter3d(x=[q[0]], y=[q[1]], z=[q[2]],
                                      mode="markers",
-                                     marker=dict(size=5, color=COLORS[2]),
+                                     marker=dict(size=5, color=INK, symbol="square"),
                                      name=f"P{i + 1}"))
         figure = go.Figure(data=data)
-        figure.update_layout(
-            title=title or None, template="plotly_white", height=580,
-            margin=dict(l=0, r=0, t=40 if title else 10, b=0),
-            scene=_scene_axes(_limits(plane_pts)))
+        _plotly_layout(figure, title, 580)
+        figure.update_layout(scene=_scene_axes(_limits(plane_pts)))
         return figure
 
     import matplotlib.pyplot as plt
@@ -379,24 +422,21 @@ def plot_plane(plane, span=(-2, 2), points=None, title: str = "",
         np.array([[p[0] for p in row] for row in surface], dtype=float),
         np.array([[p[1] for p in row] for row in surface], dtype=float),
         np.array([[p[2] for p in row] for row in surface], dtype=float),
-        alpha=0.45, color=COLORS[0], edgecolor="none")
+        alpha=0.35, color="#999999", edgecolor="none")
     px, py, pz = _floats(plane.p)
     nx, ny, nz = _floats(plane.n)
-    ax.quiver(px, py, pz, nx, ny, nz, color=COLORS[3], linewidth=2.2,
+    ax.quiver(px, py, pz, nx, ny, nz, color=RED, linewidth=2,
               arrow_length_ratio=0.15)
     for pt in points or []:
         q = _floats(_vec(pt))
-        ax.scatter(*q, color=COLORS[2], s=40)
+        ax.scatter(*q, color=INK, s=30, marker="s")
     _apply_limits_mpl(ax, _limits(plane_pts))
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    if title:
-        ax.set_title(title, fontsize=12, loc="left")
+    _style_3d(ax, title)
     fig.tight_layout()
     return _finish(fig)
 
 
+@_swiss
 def plot_transformation(A, title: str = "", grid: int = 5):
     """
     Zeigt, was eine 2×2-Matrix mit dem Einheitsquadrat und dem Gitter macht.
@@ -406,7 +446,7 @@ def plot_transformation(A, title: str = "", grid: int = 5):
     Vorzeichen sagt, ob die Orientierung kippt.
     """
     import matplotlib.pyplot as plt
-    from .determinant import det
+    from ..rechnen.determinant import det
 
     A = A if isinstance(A, Matrix) else Matrix(A)
     if A.m != 2 or A.n != 2:
@@ -426,18 +466,18 @@ def plot_transformation(A, title: str = "", grid: int = 5):
             for line in (line_a, line_b):
                 pts = [apply(*p) if transform else p for p in line]
                 ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                        color="#d2d2d7", linewidth=0.7, zorder=1)
+                        color="#cccccc", linewidth=0.6, zorder=1)
         square = [(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)]
         pts = [apply(*p) if transform else p for p in square]
-        ax.fill([p[0] for p in pts], [p[1] for p in pts], color=COLORS[0],
-                alpha=0.25, zorder=2)
-        ax.plot([p[0] for p in pts], [p[1] for p in pts], color=COLORS[0],
+        ax.fill([p[0] for p in pts], [p[1] for p in pts], color=RED,
+                alpha=0.12, linewidth=0, zorder=2)
+        ax.plot([p[0] for p in pts], [p[1] for p in pts], color=RED,
                 linewidth=2, zorder=3)
         for i, base in enumerate(((1, 0), (0, 1))):
             tip = apply(*base) if transform else base
             ax.annotate("", xy=tip, xytext=(0, 0),
                         arrowprops=dict(arrowstyle="-|>",
-                                        color=COLORS[1 + i], lw=2.4), zorder=4)
+                                        color=COLORS[2 * i], lw=2.2), zorder=4)
         limit = grid if not transform else max(
             grid, abs(a) + abs(b), abs(c) + abs(d)) * 1.2
         ax.set_xlim(-limit, limit)
