@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .core import Matrix, Vector
+from ..rechnen.core import Matrix, Vector
 
 
 @dataclass
@@ -50,7 +50,7 @@ class Exercise:
         rows = []
         for name, value in self.data.items():
             if isinstance(value, (Matrix, Vector)):
-                from .render import tex_any
+                from ..rechnen.render import tex_any
                 rows.append(f"<div>$$ {name} = {tex_any(value)} $$</div>")
             else:
                 rows.append(f"<div>{html.escape(name)} = "
@@ -240,11 +240,11 @@ def loese(key: str, weg: bool = True, decimal: bool = False):
     Gedacht zum Kontrollieren, nachdem du selbst gerechnet hast — der
     Rechenweg ist dieselbe Abfolge, die auf dem Papier stünde.
     """
-    from .factor import lu, solve_lu
-    from .inverse import inverse
-    from .determinant import det
-    from .solving import gauss_jordan
-    from .vectors import Line, Plane, angle, cross, dot
+    from ..rechnen.factor import lu, solve_lu
+    from ..rechnen.inverse import inverse
+    from ..rechnen.determinant import det
+    from ..rechnen.solving import gauss_jordan
+    from ..rechnen.vectors import Line, Plane, angle, cross, dot
 
     ex = aufgabe(key)
     data = ex.data
@@ -272,7 +272,7 @@ def loese(key: str, weg: bool = True, decimal: bool = False):
         return Plane(point, u=u, v=v).intersect_line(g, decimal=decimal)
 
     if ex.method == "vectors":
-        from .render import Result, Step
+        from ..rechnen.render import Result, Step
         u, v = data["u"], data["v"]
         out = Result(decimal)
         out.title = ex.title
@@ -303,9 +303,9 @@ def loese(key: str, weg: bool = True, decimal: bool = False):
 
 def _det_property(ex: Exercise, decimal: bool):
     """Die drei Determinanten-Eigenschaften aus SW4 am Beispiel."""
-    from .determinant import det
-    from .inverse import inverse
-    from .render import Result, Step
+    from ..rechnen.determinant import det
+    from ..rechnen.inverse import inverse
+    from ..rechnen.render import Result, Step
 
     out = Result(decimal)
     out.title = ex.title
