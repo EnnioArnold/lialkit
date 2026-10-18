@@ -38,16 +38,16 @@ from PySide6.QtCore import (QEasingCurve, QObject, QPoint, QPointF,
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetricsF, QMovie,
                            QPainter, QPainterPath, QPen)
 from PySide6.QtWidgets import (QApplication, QDialog, QFrame,
-                               QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
+                               QHBoxLayout, QLabel,
                                QLineEdit, QMainWindow, QMenu, QProgressBar,
                                QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
 # Manim ist freiwillig: fehlt es, sagt die Animationskarte, was zu tun ist.
 # Dieser Ordner ist selbst das Paket `lialkit` — auch dann, wenn er nach dem
-# GitHub-Download »lialkit-main« heisst oder man direkt `python3 gauss_qt.py`
+# GitHub-Download »lialkit-main« heisst oder man direkt `python3 app/lialkit_qt.py`
 # darin aufruft. Darum hier von Hand als Paket anmelden, vor allen Importen.
-_HERE = os.path.dirname(os.path.abspath(__file__))
+_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if "lialkit" not in sys.modules:
     import importlib.util as _ilu
     _spec = _ilu.spec_from_file_location(
@@ -56,10 +56,9 @@ if "lialkit" not in sys.modules:
     _pkg = _ilu.module_from_spec(_spec)
     sys.modules["lialkit"] = _pkg
     _spec.loader.exec_module(_pkg)
-# gauss_anim liegt neben dieser Datei.
-sys.path.insert(0, _HERE)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # orb liegt neben dieser Datei
 try:
-    import gauss_anim
+    from lialkit.grafik import anim as gauss_anim
     ANIM_IMPORT_ERROR = ""
 except Exception as _exc:                                    # pragma: no cover
     gauss_anim = None
@@ -86,10 +85,10 @@ except Exception as _exc:                                    # pragma: no cover
 # So gibt es nur eine Stelle, an der die Verfahren stehen, und ein Fehler
 # kann sich nicht in einer der beiden Oberflächen verstecken.
 
-from lialkit.core import (MINUS, Num, Operation, Vector, fmt, fmt_factor,
+from lialkit.rechnen.core import (MINUS, Num, Operation, Vector, fmt, fmt_factor,
                           parse_number, tex_number)
-from lialkit.core import Matrix as _CoreMatrix
-from lialkit.determinant import det as _det
+from lialkit.rechnen.core import Matrix as _CoreMatrix
+from lialkit.rechnen.determinant import det as _det
 
 
 class Matrix(_CoreMatrix):
@@ -627,9 +626,9 @@ def run_methods_checks(appid: str, A, method: str,
     selbst exakt nach, und Wolfram liefert mit Determinante und Stufenform
     eine unabhängige Gegenprobe.
     """
-    from lialkit.determinant import det as _det_of
-    from lialkit.factor import lu as _lu
-    from lialkit.inverse import inverse as _inverse
+    from lialkit.rechnen.determinant import det as _det_of
+    from lialkit.rechnen.factor import lu as _lu
+    from lialkit.rechnen.inverse import inverse as _inverse
 
     report = WolframReport()
     rows = [list(row) for row in A.rows]
@@ -735,14 +734,14 @@ def run_vector_checks(appid: str, op: str, u, v, w,
         query = f"Det[{matrix_literal(rows)}]"
         report.url = browser_url(query)
         answers = _ask(appid, {"q": query})
-        from lialkit.vectors import spat as _spat
+        from lialkit.rechnen.vectors import spat as _spat
         _compare(report, "Spatprodukt", _spat(u, v, w).value, answers["q"],
                  wolfram_number, lambda x: fmt(x, decimal))
     elif op == "angle":
         query = f"VectorAngle[{lit(u)},{lit(v)}] in degrees"
         report.url = browser_url(query)
         answers = _ask(appid, {"q": query})
-        from lialkit.vectors import angle as _angle
+        from lialkit.rechnen.vectors import angle as _angle
         ours = float(_angle(u, v).degrees)
         ans = answers["q"]
         if isinstance(ans, Exception):
@@ -792,23 +791,22 @@ def run_vector_checks(appid: str, op: str, u, v, w,
 # Farben und Schriften
 # ==========================================================================
 
-# Geist-Palette (Werte aus dem Skill vercel-geist-design-system): Schwarz/Weiss,
-# Graustufen, ein Akzentblau für Links und Fokus.
+# Swiss Style (claude-design-styles): Schwarz/Weiss, ein Rot, keine Rundungen.
 LIGHT = dict(
-    bg="#ffffff", nav="#fafafa", card="#ffffff", text="#171717", sec="#4d4d4d",
-    ter="#8f8f8f", line="#eaeaea", hair="#f2f2f2", fill="#f2f2f2", fill2="#fafafa",
-    seg="#ffffff", blue="#006bff", blue_hi="#0059ec", blue_soft="#e9f4ff",
-    green="#18794e", green_soft="#e6f4ec", red="#e5484d", red_soft="#fdecec",
+    bg="#ffffff", nav="#ffffff", card="#ffffff", text="#000000", sec="#333333",
+    ter="#666666", line="#000000", hair="#cccccc", fill="#f4f4f4", fill2="#f4f4f4",
+    seg="#ffffff", blue="#000000", blue_hi="#e60000", blue_soft="#f4f4f4",
+    green="#18794e", green_soft="#e6f4ec", red="#e60000", red_soft="#fdecec",
     amber="#ab5200", amber_soft="#fff4e0", flash="#fff3c4",
-    entry="#ffffff", shadow=20, dark=False)
+    entry="#ffffff", shadow=0, dark=False)
 
 DARK = dict(
-    bg="#000000", nav="#0a0a0a", card="#0a0a0a", text="#ededed", sec="#a0a0a0",
-    ter="#7d7d7d", line="#2e2e2e", hair="#1f1f1f", fill="#1a1a1a", fill2="#111111",
-    seg="#282828", blue="#006efe", blue_hi="#3291ff", blue_soft="#06193a",
-    green="#46a758", green_soft="#102a16", red="#e5484d", red_soft="#3a1516",
+    bg="#000000", nav="#000000", card="#000000", text="#ffffff", sec="#cccccc",
+    ter="#888888", line="#ffffff", hair="#333333", fill="#1a1a1a", fill2="#111111",
+    seg="#333333", blue="#e60000", blue_hi="#ff3333", blue_soft="#2a0000",
+    green="#46a758", green_soft="#102a16", red="#ff3333", red_soft="#2a0000",
     amber="#ffb224", amber_soft="#3a2a0a", flash="#3d3210",
-    entry="#0a0a0a", shadow=60, dark=True)
+    entry="#000000", shadow=0, dark=True)
 
 T: dict = dict(LIGHT)
 
@@ -823,11 +821,9 @@ def pick_font(candidates: Sequence[str], fallback: str) -> str:
 
 class Fonts:
     def __init__(self):
-        ui = pick_font(["Geist", "Inter", "SF Pro Text", ".AppleSystemUIFont",
-                        "Helvetica Neue", "Segoe UI Variable Text", "Segoe UI",
+        ui = pick_font(["Helvetica Neue", "Helvetica", "Arial", "SF Pro Text", ".AppleSystemUIFont", "Segoe UI Variable Text", "Segoe UI",
                         "DejaVu Sans"], "Sans Serif")
-        display = pick_font(["Geist", "Inter", "SF Pro Display", "SF Pro Text",
-                             "Helvetica Neue", "Segoe UI Variable Display",
+        display = pick_font(["Helvetica Neue", "Helvetica", "Arial", "SF Pro Display", "SF Pro Text", "Segoe UI Variable Display",
                              "Segoe UI", "DejaVu Sans"], ui)
         mono = pick_font(["SF Mono", "Menlo", "Cascadia Mono", "Consolas",
                           "DejaVu Sans Mono"], "Monospace")
@@ -890,7 +886,7 @@ def qcolor(key: str) -> QColor:
 
 
 class Card(QFrame):
-    """Fläche mit runden Ecken und weichem Schatten."""
+    """Eckige Fläche mit schwarzer Linie, ohne Schatten."""
 
     def __init__(self, parent=None, pad: int = 26):
         super().__init__(parent)
@@ -898,15 +894,9 @@ class Card(QFrame):
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(pad, pad, pad, pad)
         self.lay.setSpacing(0)
-        self.shadow = QGraphicsDropShadowEffect(self)
-        self.setGraphicsEffect(self.shadow)
-        self.restyle()
 
     def restyle(self):
-        self.shadow.setBlurRadius(30)
-        self.shadow.setXOffset(0)
-        self.shadow.setYOffset(4)
-        self.shadow.setColor(QColor(0, 0, 0, T["shadow"] // (3 if T["dark"] else 1)))
+        pass                      # Swiss: kein Schatten, die Linie kommt aus dem Stylesheet
 
 
 class Segmented(QWidget):
@@ -933,14 +923,14 @@ class Segmented(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
         p.setBrush(qcolor("fill2") if not self.enabled else qcolor("fill"))
-        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 9, 9)
+        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 0, 0)
         p.setFont(self.font_)
         for i, label in enumerate(self.options):
             box = QRectF(3 + i * self.seg_w, 3, self.seg_w, self.height() - 6)
             if i == self.value:
                 p.setBrush(qcolor("fill") if not self.enabled else qcolor("seg"))
                 p.setPen(Qt.NoPen)
-                p.drawRoundedRect(box, 7, 7)
+                p.drawRoundedRect(box, 0, 0)
             if not self.enabled:
                 p.setPen(qcolor("ter"))
             else:
@@ -992,7 +982,7 @@ class Stepper(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
         p.setBrush(qcolor("fill"))
-        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 15, 15)
+        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 0, 0)
         p.setFont(self.font_)
         p.setPen(qcolor("text"))
         h = self.height()
@@ -1098,7 +1088,7 @@ class Badge(QLabel):
     def restyle(self):
         self.setStyleSheet(
             f"color: {T[self.fg]}; background: {T[self.bg]};"
-            f"border-radius: 11px; padding: 4px 14px;")
+            f"border-radius: 0px; padding: 4px 14px;")
 
 
 def restyle_labels(root: QWidget):
@@ -1277,11 +1267,11 @@ class MatrixView(QWidget):
                 color.setAlphaF(self._flash)
                 p.setPen(Qt.NoPen)
                 p.setBrush(color)
-                p.drawRoundedRect(band, 14, 14)
+                p.drawRect(band)
             if self.target == r and not self.editing:
                 p.setBrush(Qt.NoBrush)
                 p.setPen(QPen(qcolor("line"), 1.4))
-                p.drawRoundedRect(band, 14, 14)
+                p.drawRect(band)
 
             active = self.target == r and not self.editing
             p.setFont(FONTS.f(12, QFont.DemiBold if active else QFont.Normal))
@@ -1298,7 +1288,7 @@ class MatrixView(QWidget):
                     p.setPen(Qt.NoPen)
                     p.setBrush(qcolor("blue_soft"))
                     p.drawRoundedRect(
-                        QRectF(center.x() - 32, center.y() - 20, 64, 40), 13, 13)
+                        QRectF(center.x() - 32, center.y() - 20, 64, 40), 0, 0)
                 self._draw_value(p, center, self.matrix.rows[r][c],
                                  qcolor("blue") if is_pivot else qcolor("text"),
                                  is_pivot)
@@ -1413,7 +1403,7 @@ class HistoryRow(QFrame):
         dot.setStyleSheet(
             f"color: {'#ffffff' if current else T['sec']};"
             f"background: {T['blue'] if current else T['fill']};"
-            f"border-radius: 12px;")
+            f"border-radius: 0px;")
         lay.addWidget(dot)
         lay.addWidget(label(text, 11))
         lay.addStretch(1)
@@ -1444,13 +1434,8 @@ class Toast(QFrame):
         lay.addWidget(self.label)
         self.setFixedHeight(self.HEIGHT)
         self.setStyleSheet(
-            f"#toast {{ background: {T['card']}; border-radius: {self.HEIGHT // 2}px;"
+            f"#toast {{ background: {T['card']}; border-radius: 0px;"
             f"border: 1px solid {T['line']}; }}")
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(26)
-        shadow.setYOffset(5)
-        shadow.setColor(QColor(0, 0, 0, 60 if not T["dark"] else 150))
-        self.setGraphicsEffect(shadow)
         self.adjustSize()
         self.setFixedWidth(max(180, self.label.sizeHint().width() + 40))
 
@@ -1531,7 +1516,7 @@ class MiniMatrix(QWidget):
                 p.drawRoundedRect(
                     QRectF(x0 - 4, cy - self.CELL_H / 2 + 2,
                            self.CELL_W * cols + gap + 8,
-                           self.CELL_H - 4), 9, 9)
+                           self.CELL_H - 4), 0, 0)
             for c in range(cols):
                 x = x0 + self.CELL_W * c + self.CELL_W / 2
                 if c >= split:
@@ -1636,7 +1621,7 @@ class WalkthroughDialog(QDialog):
         card = QFrame()
         card.setObjectName("stepcard")
         card.setStyleSheet(
-            f"#stepcard {{ background: {T['card']}; border-radius: 16px;"
+            f"#stepcard {{ background: {T['card']}; border-radius: 0px;"
             f"border: 1px solid {T['hair']}; }}")
         lay = QVBoxLayout(card)
         lay.setContentsMargins(18, 16, 18, 16)
@@ -1707,7 +1692,7 @@ class ResultView(QScrollArea):
         box = QFrame()
         box.setObjectName("errbox")
         box.setStyleSheet(f"#errbox {{ background: {T['red_soft']};"
-                          f"border-radius: 12px; }}")
+                          f"border-radius: 0px; }}")
         bl = QVBoxLayout(box)
         bl.setContentsMargins(16, 13, 16, 13)
         bl.addWidget(wrapped(message, 460, 12, "red"))
@@ -1733,7 +1718,7 @@ class ResultView(QScrollArea):
             box = QFrame()
             box.setObjectName("warnbox")
             box.setStyleSheet(f"#warnbox {{ background: {T['amber_soft']};"
-                              f"border-radius: 10px; }}")
+                              f"border-radius: 0px; }}")
             bl = QVBoxLayout(box)
             bl.setContentsMargins(14, 10, 14, 10)
             bl.addWidget(wrapped(warning, 460, 11, "amber"))
@@ -1747,12 +1732,12 @@ class ResultView(QScrollArea):
         self.lay.addStretch(1)
 
     def _step_card(self, index: int, step, decimal: bool) -> QWidget:
-        from lialkit.render import tex_to_text
+        from lialkit.rechnen.render import tex_to_text
 
         card = QFrame()
         card.setObjectName("stepcard")
         card.setStyleSheet(f"#stepcard {{ background: {T['fill2']};"
-                           f"border-radius: 14px; }}")
+                           f"border-radius: 0px; }}")
         lay = QVBoxLayout(card)
         lay.setContentsMargins(16, 13, 16, 13)
         lay.setSpacing(5)
@@ -1761,11 +1746,16 @@ class ResultView(QScrollArea):
         if step.detail:
             lay.addWidget(wrapped(tex_to_text(step.detail), 450, 11, "sec"))
         if step.items:
-            row = QHBoxLayout()
-            row.setSpacing(18)
+            # Breite Matrizen (Punktlisten) nebeneinander passen nicht in die
+            # Karte; dann stehen die Grössen untereinander.
+            wide = sum(MiniMatrix.PAD * 2 + 26 + MiniMatrix.CELL_W * getattr(o, "width", 1)
+                       for _, o in step.items) > 560
+            row = QVBoxLayout() if wide else QHBoxLayout()
+            row.setSpacing(8 if wide else 18)
             for name, obj in step.items:
                 row.addLayout(self._item(name, obj, decimal))
-            row.addStretch(1)
+            if not wide:
+                row.addStretch(1)
             lay.addLayout(row)
         if step.note:
             lay.addWidget(wrapped(step.note, 450, 10, "ter"))
@@ -1775,7 +1765,7 @@ class ResultView(QScrollArea):
         card = QFrame()
         card.setObjectName("rescard")
         card.setStyleSheet(f"#rescard {{ background: {T['blue_soft']};"
-                           f"border-radius: 14px; }}")
+                           f"border-radius: 0px; }}")
         lay = QHBoxLayout(card)
         lay.setContentsMargins(16, 13, 16, 13)
         lay.setSpacing(20)
@@ -1785,8 +1775,8 @@ class ResultView(QScrollArea):
         return card
 
     def _item(self, name: str, obj, decimal: bool, big: bool = False):
-        from lialkit.core import Matrix as CoreMatrix, Vector as CoreVector
-        from lialkit.render import tex_to_text
+        from lialkit.rechnen.core import Matrix as CoreMatrix, Vector as CoreVector
+        from lialkit.rechnen.render import tex_to_text
 
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -1797,8 +1787,18 @@ class ResultView(QScrollArea):
         if isinstance(obj, CoreVector):
             obj = CoreMatrix([[v] for v in obj.values])
         if isinstance(obj, CoreMatrix):
-            row.addWidget(MiniMatrix(_as_app_matrix(obj), decimal), 0,
-                          Qt.AlignVCenter)
+            mini = MiniMatrix(_as_app_matrix(obj), decimal)
+            if mini.width() > 440:
+                # Sehr breit (Punkte eines Buchstabens): seitlich verschiebbar.
+                scroll = QScrollArea()
+                scroll.setFrameShape(QFrame.NoFrame)
+                scroll.setWidget(mini)
+                mini.setAutoFillBackground(False)
+                scroll.viewport().setAutoFillBackground(False)
+                scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                scroll.setFixedSize(440, mini.height() + 16)
+                mini = scroll
+            row.addWidget(mini, 0, Qt.AlignVCenter)
         else:
             row.addWidget(label(fmt(obj, decimal), 13 if big else 12,
                                 weight=QFont.DemiBold if big else QFont.Normal),
@@ -2021,7 +2021,7 @@ class MethodsPage(QWidget):
     # -- Rechnen ----------------------------------------------------------
 
     def matrix(self):
-        from lialkit.core import Matrix as CoreMatrix
+        from lialkit.rechnen.core import Matrix as CoreMatrix
         self.read_fields()
         rows = []
         for r in self.draft:
@@ -2032,10 +2032,10 @@ class MethodsPage(QWidget):
         return CoreMatrix(rows)
 
     def compute(self):
-        from lialkit.determinant import det
-        from lialkit.factor import lu
-        from lialkit.inverse import inverse
-        from lialkit.solving import rank
+        from lialkit.rechnen.determinant import det
+        from lialkit.rechnen.factor import lu
+        from lialkit.rechnen.inverse import inverse
+        from lialkit.rechnen.solving import rank
 
         try:
             A = self.matrix()
@@ -2075,9 +2075,9 @@ class MethodsPage(QWidget):
         dort gibt es nichts zu animieren, und der Text sagt das statt einen
         Film zu zeigen, der nichts erklärt.
         """
-        from lialkit.factor import lu
-        from lialkit.inverse import inverse
-        from lialkit.solving import rank
+        from lialkit.rechnen.factor import lu
+        from lialkit.rechnen.inverse import inverse
+        from lialkit.rechnen.solving import rank
 
         if self.method == "det":
             return ("Die Determinante entsteht ohne Zwischenmatrizen — "
@@ -2109,7 +2109,7 @@ class MethodsPage(QWidget):
         Bei 3×3 die drei Spalten als Vektoren mit dem Spat, dessen Volumen
         |det A| ist. Grössere Matrizen lassen sich nicht zeichnen.
         """
-        from lialkit import plots
+        from lialkit.grafik import plots
 
         try:
             A = self.matrix()
@@ -2211,6 +2211,12 @@ def theme_figure(figure):
             # Die beiden Nulllinien der flachen Zeichnungen.
             if child.get_linestyle() == "-" and child.get_linewidth() <= 1.01:
                 child.set_color(sec)
+            elif (getattr(child, "_lk_ink", False)
+                  or str(child.get_color()).lower() in ("#000000", "k", "black")):
+                # Schwarze Datenlinien (das Bild einer Abbildung): sonst im
+                # Dunkelmodus unsichtbar. Gemerkt, damit der Rückwechsel klappt.
+                child._lk_ink = True
+                child.set_color(text)
         legend = ax.get_legend()
         if legend is not None:
             legend.get_frame().set_facecolor(card)
@@ -2948,13 +2954,13 @@ class VectorsPage(QWidget):
         self.anim.refresh()
 
     def vectors(self):
-        from lialkit.core import Vector as CoreVector
+        from lialkit.rechnen.core import Vector as CoreVector
         self.read_fields()
         return [CoreVector([parse_number(v) for v in row])
                 for row in self.values]
 
     def compute(self):
-        from lialkit.vectors import (add, angle, cross, dot, position,
+        from lialkit.rechnen.vectors import (add, angle, cross, dot, position,
                                      projection, scale, spat)
         try:
             u, v, w = self.vectors()
@@ -3002,7 +3008,7 @@ class VectorsPage(QWidget):
         Beim Vektorprodukt und bei der Projektion gehört das Ergebnis mit
         ins Bild — erst dann zeigt die Animation, worum es geht.
         """
-        from lialkit.vectors import angle, dot, spat
+        from lialkit.rechnen.vectors import angle, dot, spat
 
         if self.op in ("add", "position", "scale"):
             return ("Für diese Rechnung gibt es keine Animation — "
@@ -3042,9 +3048,9 @@ class VectorsPage(QWidget):
 
     def figure(self, interactive: bool):
         """Baut die Zeichnung zur gerade gewählten Rechnung."""
-        from lialkit import plots
+        from lialkit.grafik import plots
 
-        from lialkit.core import Vector as CoreVector
+        from lialkit.rechnen.core import Vector as CoreVector
 
         u, v, w = self.vectors()
         zero = CoreVector([0] * self.dim)
@@ -3135,6 +3141,406 @@ class VectorsPage(QWidget):
         self.wolfram.restyle()
 
 
+# ==========================================================================
+# Reiter: Abbildungen
+# ==========================================================================
+
+#: Matrixtypen der Seite: Name → Eingabefelder (Beschriftung, Vorgabe).
+MAP_TYPES = {
+    "Eigene": [],
+    "Skalierung": [("sx", "2"), ("sy", "2")],
+    "Drehung": [("φ in Grad", "30")],
+    "Drehstreckung": [("a", "1"), ("b", "1")],
+    "Scherung (x)": [("k", "1")],
+    "Scherung (y)": [("k", "1")],
+    "Spiegelung an Achse": [("φ in Grad", "45")],
+}
+
+MAP_OPS = {"Abbilden": "apply", "Zusammensetzen": "compose",
+           "Aus Bildern ablesen": "read"}
+
+
+def map_matrix(typ: str, values: Sequence[str]):
+    """Die 2×2-Matrix zu Typ und Eingabefeldern; ValueError bei einer unlesbaren Zahl."""
+    from lialkit.rechnen import abbildung as ab
+
+    v = [parse_number(x) for x in values]
+    if typ == "Eigene":
+        return _CoreMatrix([[v[0], v[1]], [v[2], v[3]]])
+    return {"Skalierung": lambda: ab.skalierung(*v),
+            "Drehung": lambda: ab.drehung(*v),
+            "Drehstreckung": lambda: ab.drehstreckung(*v),
+            "Scherung (x)": lambda: ab.scherung(v[0], "x"),
+            "Scherung (y)": lambda: ab.scherung(v[0], "y"),
+            "Spiegelung an Achse": lambda: ab.spiegelung_achse(*v)}[typ]()
+
+
+def map_text(M) -> str:
+    """Matrix als eine Zeile, z. B. »(1 2 ; 0 1)«; irrationale Einträge dezimal."""
+    return "(" + " ; ".join(
+        "  ".join(fmt(x, x.denominator > 10 ** 6) for x in row)
+        for row in M.rows) + ")"
+
+
+class MatrixSlot(QWidget):
+    """Eine 2×2-Matrix: von Hand eingeben (»Eigene«) oder als Typ mit Parametern wählen."""
+
+    changed = Signal()
+
+    def __init__(self, name: str, typ: str, cells, parent=None):
+        super().__init__(parent)
+        self.typ = typ
+        self.vals = {t: [d for _, d in spec] for t, spec in MAP_TYPES.items()}
+        self.vals["Eigene"] = [str(c) for row in cells for c in row]
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        head.addWidget(label(name, 12, weight=QFont.DemiBold))
+        self.drop = Dropdown(list(MAP_TYPES), value=typ)
+        self.drop.setFixedWidth(190)
+        self.drop.picked.connect(self.set_type)
+        head.addWidget(self.drop)
+        head.addStretch(1)
+        lay.addLayout(head)
+        self.host = QVBoxLayout()
+        self.host.setSpacing(6)
+        lay.addLayout(self.host)
+        self.preview = label("", 10, "ter", mono=True, wrap=True)
+        lay.addWidget(self.preview)
+        self._build()
+
+    def _build(self):
+        def drop_all(layout):
+            while layout.count():
+                item = layout.takeAt(0)
+                if item.widget():
+                    item.widget().setParent(None)
+                    item.widget().deleteLater()
+                elif item.layout():
+                    drop_all(item.layout())
+        drop_all(self.host)
+        self.fields = []
+
+        def field(text):
+            f = QLineEdit(text)
+            f.setObjectName("cell")
+            f.setAlignment(Qt.AlignCenter)
+            f.setFont(FONTS.f(13))
+            f.setFixedSize(58, 34)
+            f.textChanged.connect(self._edited)
+            self.fields.append(f)
+            return f
+
+        vals = self.vals[self.typ]
+        if self.typ == "Eigene":
+            for r in range(2):
+                row = QHBoxLayout()
+                row.setSpacing(6)
+                for c in range(2):
+                    row.addWidget(field(vals[2 * r + c]))
+                row.addStretch(1)
+                self.host.addLayout(row)
+        else:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            for (name, _), text in zip(MAP_TYPES[self.typ], vals):
+                row.addWidget(label(name, 11, "sec"))
+                row.addWidget(field(text))
+                row.addSpacing(8)
+            row.addStretch(1)
+            self.host.addLayout(row)
+        self._update_preview()
+
+    def _edited(self):
+        self.vals[self.typ] = [f.text() for f in self.fields]
+        self._update_preview()
+        self.changed.emit()
+
+    def set_type(self, typ: str):
+        self.typ = typ
+        self.drop.set_value(typ)
+        self._build()
+        self.changed.emit()
+
+    def state(self):
+        return (self.typ, tuple(self.vals[self.typ]))
+
+    def matrix(self):
+        return map_matrix(self.typ, self.vals[self.typ])
+
+    def _update_preview(self):
+        if self.typ == "Eigene":
+            self.preview.setText("")
+            return
+        try:
+            self.preview.setText("A = " + map_text(self.matrix()))
+        except ValueError as exc:
+            self.preview.setText(str(exc))
+
+
+class MapsPage(QWidget):
+    """Lineare Abbildungen der Ebene: Bildpunkte, Zusammensetzen, Matrix aus dem Bild."""
+
+    ANIM_SUBTITLE = ("Zeigt, wie sich das Einheitsgitter und die Figur "
+                     "stetig von der Identität zur Abbildung verformen.")
+
+    def __init__(self, window, parent=None):
+        super().__init__(parent)
+        self.setObjectName("page")
+        self.window = window
+        self.op = "apply"
+        self.obj = "square"
+        self.decimal = False
+        self.q_vals = [["0", "0"], ["1", "0"], ["3", "1"], ["2", "1"]]
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(32, 26, 32, 30)
+        outer.setSpacing(0)
+        outer.addWidget(label("Lineare Abbildungen", 26, weight=QFont.Bold,
+                              display=True))
+        outer.addWidget(label("Bildpunkte, Zusammensetzen und die Matrix zu "
+                              "einem Bild — mit Rechenweg, Zeichnung und "
+                              "Animation.", 13, "sec", display=True, wrap=True))
+        outer.addSpacing(20)
+
+        columns = QHBoxLayout()
+        columns.setSpacing(20)
+        outer.addLayout(columns, 1)
+        left = QVBoxLayout()
+        left.setSpacing(18)
+        columns.addLayout(left, 2)
+        right = QVBoxLayout()
+        right.setSpacing(18)
+        columns.addLayout(right, 3)
+
+        # -- Eingabe
+        self.card_input = Card()
+        left.addWidget(self.card_input)
+        lay = self.card_input.lay
+        self.lbl_head = label("Abbildung", 15, weight=QFont.DemiBold)
+        lay.addWidget(self.lbl_head)
+        lay.addSpacing(10)
+        self.slot_a = MatrixSlot("A", "Eigene", [["1", "1"], ["0", "1"]])
+        self.slot_b = MatrixSlot("B", "Drehung", [["1", "0"], ["0", "1"]])
+        self.slot_b.vals["Drehung"] = ["90"]
+        self.slot_b._build()
+        for slot in (self.slot_a, self.slot_b):
+            slot.changed.connect(self._input_changed)
+            lay.addWidget(slot)
+            lay.addSpacing(8)
+
+        self.read_box = QWidget()
+        rlay = QVBoxLayout(self.read_box)
+        rlay.setContentsMargins(0, 0, 0, 0)
+        rlay.setSpacing(6)
+        rlay.addWidget(label("Bilder der Ecken des Einheitsquadrats", 11, "sec",
+                             wrap=True))
+        self.q_fields = []
+        for i, name in enumerate(("(0, 0)", "(1, 0)", "(1, 1)", "(0, 1)")):
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            lb = label(name + " ↦", 11, "sec")
+            lb.setFixedWidth(64)
+            row.addWidget(lb)
+            line = []
+            for c in range(2):
+                f = QLineEdit(self.q_vals[i][c])
+                f.setObjectName("cell")
+                f.setAlignment(Qt.AlignCenter)
+                f.setFont(FONTS.f(13))
+                f.setFixedSize(58, 34)
+                f.textChanged.connect(self._input_changed)
+                row.addWidget(f)
+                line.append(f)
+            row.addStretch(1)
+            self.q_fields.append(line)
+            rlay.addLayout(row)
+        lay.addWidget(self.read_box)
+
+        self.obj_row = QWidget()
+        orow = QHBoxLayout(self.obj_row)
+        orow.setContentsMargins(0, 0, 0, 0)
+        orow.addWidget(label("Objekt", 11, "sec"))
+        self.seg_obj = Segmented(["Einheitsquadrat", "Buchstabe F"], 0,
+                                 seg_width=118)
+        self.seg_obj.changed.connect(self.set_obj)
+        orow.addWidget(self.seg_obj)
+        orow.addStretch(1)
+        lay.addWidget(self.obj_row)
+        self.lbl_err = label("", 11, "red", wrap=True)
+        lay.addWidget(self.lbl_err)
+
+        # -- Rechnung
+        self.card_op = Card()
+        left.addWidget(self.card_op)
+        olay = self.card_op.lay
+        olay.addWidget(label("Rechnung", 15, weight=QFont.DemiBold))
+        olay.addSpacing(12)
+        self.drop_op = Dropdown(list(MAP_OPS), value="Abbilden")
+        self.drop_op.picked.connect(lambda name: self.set_op(list(MAP_OPS).index(name)))
+        olay.addWidget(self.drop_op)
+        olay.addSpacing(12)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(pill("Rechnen", "primary", self.compute))
+        self.seg_fmt = Segmented(["Brüche", "Dezimal"], 0)
+        self.seg_fmt.changed.connect(self.set_format)
+        row.addWidget(self.seg_fmt)
+        row.addWidget(pill("Zeichnen", "secondary", self.draw, small=True))
+        row.addStretch(1)
+        olay.addLayout(row)
+        olay.addSpacing(8)
+        self.lbl_note = label("", 10, "ter", wrap=True)
+        olay.addWidget(self.lbl_note)
+        left.addStretch(1)
+
+        output_card(self, right)
+        self.set_op(0)
+
+    # -- Eingabe ----------------------------------------------------------
+
+    def _input_changed(self):
+        self.q_vals = [[f.text() for f in row] for row in self.q_fields]
+        self.anim.refresh()
+
+    def set_op(self, index: int):
+        self.op = list(MAP_OPS.values())[index]
+        self.drop_op.set_value(list(MAP_OPS)[index])
+        self.slot_a.setVisible(self.op != "read")
+        self.slot_b.setVisible(self.op == "compose")
+        self.read_box.setVisible(self.op == "read")
+        self.obj_row.setVisible(self.op != "read")
+        self.lbl_head.setText({"apply": "Abbildung A", "compose": "Zwei Abbildungen",
+                               "read": "Gegebenes Bild"}[self.op])
+        self.lbl_note.setText({
+            "apply": "Q = A·P: die Spalten von A sind die Bilder von e₁ und e₂, "
+                     "die Punkte stehen spaltenweise in P.",
+            "compose": "Erst A, dann B: die Reihenfolge ergibt C = B·A — die "
+                       "zuerst angewendete Matrix steht rechts.",
+            "read": "Gibt es eine lineare Abbildung, die das Einheitsquadrat "
+                    "auf diese Punkte abbildet? Sonst: geht es mit homogenen "
+                    "Koordinaten?"}[self.op])
+        self.lbl_err.setText("")
+        self.anim.refresh()
+
+    def set_obj(self, index: int):
+        self.obj = ("square", "F")[index]
+        self.anim.refresh()
+
+    def set_format(self, index: int):
+        self.decimal = bool(index)
+        self.compute()
+
+    # -- Daten ------------------------------------------------------------
+
+    def points(self, closed: bool = False):
+        """Die Punkte des Objekts, spaltenweise; geschlossen für Zeichnung und Film."""
+        from lialkit.rechnen.abbildung import BUCHSTABE_F_FOLIEN, EINHEITSQUADRAT
+
+        if self.obj == "square":
+            return EINHEITSQUADRAT if closed else _CoreMatrix(
+                [r[:4] for r in EINHEITSQUADRAT.rows])
+        F = BUCHSTABE_F_FOLIEN
+        return _CoreMatrix([r + r[:1] for r in F.rows]) if closed else F
+
+    def image_points(self):
+        """Die vier eingegebenen Bildpunkte (Zeilen von q_vals) als Liste von Paaren."""
+        self._input_changed()
+        return [[parse_number(x) for x in row] for row in self.q_vals]
+
+    def result(self):
+        """Das Ergebnis der gewählten Rechnung (wirft ValueError)."""
+        from lialkit.rechnen import abbildung as ab
+
+        if self.op == "read":
+            return ab.finde_abbildung(self.image_points(), decimal=self.decimal)
+        A = self.slot_a.matrix()
+        if self.op == "apply":
+            return ab.abbilden(A, self.points(), decimal=self.decimal)
+        return ab.zusammensetzen(A, self.slot_b.matrix(), namen=("A", "B"),
+                                 P=self.points(), decimal=self.decimal)
+
+    def compute(self):
+        try:
+            result = self.result()
+        except ValueError as exc:
+            self.lbl_err.setText(str(exc))
+            self.view.show_error(str(exc))
+            show_view(self, 0)
+            return
+        self.lbl_err.setText("")
+        # Näherungen (cos 30° …) zeigt das Ergebnis dezimal, auch bei »Brüche«.
+        self.view.show_result(result, self.decimal or result.decimal)
+        show_view(self, 0)
+
+    def matrix_to_draw(self):
+        """(Matrix, Punkte, Titel) für Zeichnung und Film, oder ein Text, warum nichts da ist."""
+        from lialkit.rechnen import abbildung as ab
+
+        if self.op == "apply":
+            return self.slot_a.matrix(), self.points(True), "Q = A·P"
+        if self.op == "compose":
+            C = ab.zusammensetzen(self.slot_a.matrix(),
+                                  self.slot_b.matrix()).matrix
+            return C, self.points(True), "C = B·A"
+        res = ab.finde_abbildung(self.image_points())
+        M = res.A if res.A is not None else res.H
+        if M is None:
+            return ("Zu diesem Bild gibt es keine Abbildung — auch nicht mit "
+                    "homogenen Koordinaten. Es gibt nichts zu zeigen.")
+        return M, ab.EINHEITSQUADRAT, "Abbildung zum Bild"
+
+    # -- Animation --------------------------------------------------------
+
+    def anim_key(self):
+        return (self.op, self.obj, self.slot_a.state(),
+                self.slot_b.state() if self.op == "compose" else None,
+                tuple(map(tuple, self.q_vals)) if self.op == "read" else None)
+
+    def build_job(self, _scene: str, quality: str):
+        got = self.matrix_to_draw()
+        if isinstance(got, str):
+            return got
+        M, P, _title = got
+        pts = [(float(P.rows[0][j]), float(P.rows[1][j])) for j in range(P.width)]
+        return gauss_anim.job_from_abbildung(
+            M.rows, pts, f"Matrix = {map_text(M)}", quality=quality)
+
+    # -- Zeichnung --------------------------------------------------------
+
+    def draw(self):
+        from lialkit.grafik.plots_abbildung import plot_abbildung
+
+        try:
+            got = self.matrix_to_draw()
+        except ValueError as exc:
+            self.lbl_err.setText(str(exc))
+            return
+        self.lbl_err.setText("")
+        if isinstance(got, str):
+            self.plot.show_message(got)
+        elif not PlotCanvas.available():
+            self.plot.show_message("Zum Zeichnen fehlt Matplotlib. "
+                                   "Mit »pip install matplotlib« nachinstallieren.")
+        else:
+            try:
+                self.plot.show_figure(
+                    plot_abbildung(got[0], got[1], titel=got[2]),
+                    "Original in Rot, Bild in Schwarz.")
+            except Exception as exc:
+                self.plot.show_message(f"Zeichnen ging nicht: {exc}")
+        show_view(self, 1)
+
+    def restyle(self):
+        for card in (self.card_input, self.card_op, self.card_out):
+            card.restyle()
+        self.view._placeholder("Nach dem Themawechsel neu rechnen.")
+        self.plot.restyle()
+        self.anim.restyle()
+
+
 def movie_size(path: str) -> QSize:
     """
     Die Bildgrösse einer Animation, ohne sie abzuspielen.
@@ -3203,9 +3609,22 @@ class HelpDialog(QDialog):
          "eigentliche Motor der Elimination: damit entstehen die Nullen."),
     ]
 
+    TITLE = "Zeilenoperationen"
+    HEADING = "Die drei Zeilenoperationen"
+    INTRO = ("Keine davon ändert die Lösungsmenge des Gleichungssystems — "
+             "deshalb darfst du sie beliebig anwenden.")
+    FOOT_HEADING = "Die beiden Zielformen"
+    FOOT = [
+        "Zeilenstufenform: Nullzeilen stehen unten, und jede führende Zahl "
+        "steht weiter rechts als die in der Zeile darüber. Daraus bekommst "
+        "du die Lösung durch Rückwärtseinsetzen.",
+        "Reduzierte Zeilenstufenform: zusätzlich ist jede führende Zahl "
+        "eine 1 und in ihrer Spalte der einzige Eintrag ungleich 0. Dann "
+        "steht die Lösung direkt in der letzten Spalte."]
+
     def __init__(self, parent):
         super().__init__(parent)
-        self.setWindowTitle("Zeilenoperationen")
+        self.setWindowTitle(self.TITLE)
         self.setModal(True)
         self.setFixedWidth(540)
         self.setStyleSheet(parent.styleSheet())
@@ -3214,18 +3633,15 @@ class HelpDialog(QDialog):
         lay.setSpacing(12)
         lay.setSizeConstraint(QVBoxLayout.SetMinimumSize)
 
-        lay.addWidget(label("Die drei Zeilenoperationen", 15,
-                            weight=QFont.DemiBold))
-        lay.addWidget(wrapped(
-            "Keine davon ändert die Lösungsmenge des Gleichungssystems — "
-            "deshalb darfst du sie beliebig anwenden.", 484))
+        lay.addWidget(label(self.HEADING, 15, weight=QFont.DemiBold))
+        lay.addWidget(wrapped(self.INTRO, 484))
         lay.addSpacing(4)
 
         for title, formula, text in self.SECTIONS:
             box = QFrame()
             box.setObjectName("helpbox")
             box.setStyleSheet(
-                f"#helpbox {{ background: {T['fill2']}; border-radius: 14px; }}")
+                f"#helpbox {{ background: {T['fill2']}; border-radius: 0px; }}")
             bl = QVBoxLayout(box)
             bl.setContentsMargins(16, 13, 16, 13)
             bl.setSpacing(4)
@@ -3238,21 +3654,47 @@ class HelpDialog(QDialog):
             lay.addWidget(box)
 
         lay.addSpacing(6)
-        lay.addWidget(label("Die beiden Zielformen", 12, weight=QFont.DemiBold))
-        lay.addWidget(wrapped(
-            "Zeilenstufenform: Nullzeilen stehen unten, und jede führende Zahl "
-            "steht weiter rechts als die in der Zeile darüber. Daraus bekommst "
-            "du die Lösung durch Rückwärtseinsetzen.", 484))
-        lay.addWidget(wrapped(
-            "Reduzierte Zeilenstufenform: zusätzlich ist jede führende Zahl "
-            "eine 1 und in ihrer Spalte der einzige Eintrag ungleich 0. Dann "
-            "steht die Lösung direkt in der letzten Spalte.", 484))
+        lay.addWidget(label(self.FOOT_HEADING, 12, weight=QFont.DemiBold))
+        for text in self.FOOT:
+            lay.addWidget(wrapped(text, 484))
 
         lay.addSpacing(10)
         row = QHBoxLayout()
         row.addStretch(1)
         row.addWidget(pill("Verstanden", "primary", self.accept, small=True))
         lay.addLayout(row)
+
+
+class MapsHelpDialog(HelpDialog):
+    """Hilfe der Seite »Abbildungen«."""
+
+    TITLE = "Lineare Abbildungen"
+    HEADING = "Die drei Rechnungen"
+    INTRO = ("Eine lineare Abbildung der Ebene ist eine 2×2-Matrix A. Ihre "
+             "Spalten sind die Bilder der Einheitsvektoren e₁ und e₂ — mehr "
+             "braucht es nicht, um jeden Punkt abzubilden.")
+    SECTIONS = [
+        ("Abbilden", "Q = A·P",
+         "Die Punkte stehen spaltenweise in P. Jede Spalte von Q ist das Bild "
+         "des Punktes darüber: p₁·A e₁ + p₂·A e₂. Typen wie Drehung, "
+         "Skalierung, Scherung oder Spiegelung füllen A für dich."),
+        ("Zusammensetzen", "C = B·A",
+         "Erst A, dann B. Die zuerst angewendete Abbildung steht im Produkt "
+         "rechts. Vertauscht man die Reihenfolge, kommt im Allgemeinen eine "
+         "andere Abbildung heraus."),
+        ("Aus Bildern ablesen", "f(0) = 0",
+         "Aus den Bildern der Ecken des Einheitsquadrats wird A abgelesen. "
+         "Wird der Nullpunkt nicht auf sich selbst abgebildet, gibt es keine "
+         "lineare Abbildung; ist das Bild ein Parallelogramm, geht es "
+         "trotzdem mit einer 3×3-Matrix in homogenen Koordinaten."),
+    ]
+    FOOT_HEADING = "Zeichnung und Animation"
+    FOOT = [
+        "Die Zeichnung zeigt das Original in Rot und das Bild in Schwarz. "
+        "Die Animation verformt das Einheitsgitter und die Figur stetig von "
+        "der Identität zu A.",
+        "Einträge wie cos 30° sind irrational und erscheinen auf vier "
+        "Stellen gerundet."]
 
 
 class AppIDDialog(QDialog):
@@ -3374,7 +3816,7 @@ class MoviePlayer(QWidget):
         self.screen = QLabel()
         self.screen.setAlignment(Qt.AlignCenter)
         self.screen.setStyleSheet(
-            f"background: {T['fill2']}; border-radius: 12px;")
+            f"background: {T['fill2']}; border-radius: 0px;")
         self.stage.addWidget(self.screen)
 
         self.video = None
@@ -3573,7 +4015,7 @@ class MoviePlayer(QWidget):
 
     def restyle(self):
         self.screen.setStyleSheet(
-            f"background: {T['fill2']}; border-radius: 12px;")
+            f"background: {T['fill2']}; border-radius: 0px;")
         self._paint_video_background()
 
 
@@ -3637,8 +4079,8 @@ class MainWindow(QMainWindow):
         self.brand = label("lialkit", 13, weight=QFont.DemiBold)
         nav_lay.addWidget(self.brand)
         nav_lay.addSpacing(18)
-        self.seg_page = Segmented(["Gauss", "Verfahren", "Vektoren"], 0,
-                                  seg_width=84)
+        self.seg_page = Segmented(["Gauss", "Verfahren", "Vektoren", "Abbildungen"],
+                                  0, seg_width=96)
         self.seg_page.changed.connect(self.set_page)
         nav_lay.addWidget(self.seg_page)
         nav_lay.addStretch(1)
@@ -3706,7 +4148,8 @@ class MainWindow(QMainWindow):
 
         self.page_methods = MethodsPage(self)
         self.page_vectors = VectorsPage(self)
-        for page in (self.page_methods, self.page_vectors):
+        self.page_maps = MapsPage(self)
+        for page in (self.page_methods, self.page_vectors, self.page_maps):
             holder = QScrollArea()
             holder.setObjectName("page")
             holder.setWidgetResizable(True)
@@ -3952,7 +4395,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.anim_hint)
 
         self.anim_orb = ThinkingOrb(64)
-        self.anim_orb.set_colors([T['blue'], T['text'], T['sec']])
+        self.anim_orb.set_colors([T['blue_hi'], T['text'], T['sec']])
         self.anim_orb.hide()
         lay.addSpacing(10)
         lay.addWidget(self.anim_orb, alignment=Qt.AlignLeft)
@@ -4033,63 +4476,65 @@ class MainWindow(QMainWindow):
         QMainWindow, #page, QStackedWidget {{ background: {T['bg']}; }}
         QScrollArea {{ background: transparent; }}
         #nav {{ background: {T['nav']}; }}
-        #card {{ background: {T['card']}; border-radius: 12px;
-                 border: 1px solid {T['line']}; }}
-        #hint, #preview {{ background: {T['fill2']}; border-radius: 14px; }}
+        #card {{ background: {T['card']}; border-radius: 0px;
+                 border: {'1px' if T['dark'] else '2px'} solid {T['line']}; }}
+        #hint, #preview {{ background: {T['fill2']}; border-radius: 0px; }}
         #preview {{ padding: 13px 15px; color: {T['text']}; }}
-        #histhost {{ background: {T['fill2']}; border-radius: 14px; }}
-        #histrow {{ background: transparent; border-radius: 10px; }}
+        #histhost {{ background: {T['fill2']}; border-radius: 0px; }}
+        #histrow {{ background: transparent; border-radius: 0px; }}
         #histrow:hover {{ background: {T['fill']}; }}
-        #histrow_on {{ background: {T['blue_soft']}; border-radius: 10px; }}
-        QPushButton#primary {{ background: {T['text']}; color: {T['bg']};
-            border: none; border-radius: 6px; padding: 0 22px; }}
-        QPushButton#primary:hover {{ background: {T['sec']}; }}
+        #histrow_on {{ background: {T['blue_soft']}; border-radius: 0px; }}
+        QPushButton#primary {{ background: {T['blue']}; color: #ffffff;
+            border: none; border-radius: 0px; padding: 0 22px; }}
+        QPushButton#primary:hover {{ background: {T['blue_hi']}; }}
         QPushButton#primary:disabled {{ background: {T['fill']};
             color: {T['ter']}; }}
-        QPushButton#secondary {{ background: transparent; color: {T['text']};
-            border: 1px solid {T['line']}; border-radius: 6px; padding: 0 18px; }}
-        QPushButton#secondary:hover {{ background: {T['fill']}; }}
-        QPushButton#secondary:disabled {{ color: {T['ter']}; }}
+        QPushButton#secondary {{ background: {T['fill']}; color: {T['text']};
+            border: 1px solid {T['line']}; border-radius: 0px; padding: 0 18px; }}
+        QPushButton#secondary:hover {{ background: {T['line']}; color: {T['bg']}; }}
+        QPushButton#secondary:disabled {{ color: {T['ter']}; border-color: {T['hair']}; }}
         QPushButton#plain {{ background: transparent; color: {T['blue']};
             border: none; padding: 0 10px; }}
         QPushButton#plain:hover {{ text-decoration: underline; }}
         QPushButton#plain:disabled {{ color: {T['ter']}; }}
         QPushButton#dropdown {{ background: {T['fill']}; color: {T['text']};
-            border: none; border-radius: 9px; padding: 0 10px; text-align: left; }}
-        QPushButton#dropdown:hover {{ background: {T['line']}; }}
+            border: none; border-radius: 0px; padding: 0 10px; text-align: left; }}
+        QPushButton#dropdown:hover {{ background: {T['line']}; color: {T['bg']}; }}
         QLineEdit#cell {{ background: {T['entry']}; color: {T['text']};
-            border: 1px solid {T['line']}; border-radius: 11px; padding: 0 6px;
+            border: 1px solid {T['line']}; border-radius: 0px; padding: 0 6px;
             selection-background-color: {T['blue']}; }}
-        QLineEdit#cell:focus {{ border: 2px solid {T['blue']}; }}
+        QLineEdit#cell:focus {{ border: 2px solid {T['blue_hi']}; }}
         QMenu {{ background: {T['card']}; color: {T['text']};
-            border: 1px solid {T['line']}; border-radius: 10px; padding: 5px; }}
-        QMenu::item {{ padding: 6px 22px; border-radius: 6px; }}
+            border: 1px solid {T['line']}; border-radius: 0px; padding: 5px; }}
+        QMenu::item {{ padding: 6px 22px; border-radius: 0px; }}
         QMenu::item:selected {{ background: {T['blue']}; color: #ffffff; }}
+        QToolTip {{ background: {T['card']}; color: {T['text']};
+            border: 1px solid {T['line']}; padding: 4px 8px; }}
         QScrollBar:vertical {{ background: transparent; width: 12px; margin: 2px; }}
         QScrollBar::handle:vertical {{ background: {T['line']};
-            border-radius: 5px; min-height: 40px; }}
+            border-radius: 0px; min-height: 40px; }}
         QScrollBar::handle:vertical:hover {{ background: {T['ter']}; }}
         QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
         QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
         QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 2px; }}
         QScrollBar::handle:horizontal {{ background: {T['line']};
-            border-radius: 5px; min-width: 40px; }}
+            border-radius: 0px; min-width: 40px; }}
         QDialog {{ background: {T['card']}; }}
         QProgressBar#progress {{ background: {T['fill']}; border: none;
-            border-radius: 3px; }}
-        QProgressBar#progress::chunk {{ background: {T['blue']};
-            border-radius: 3px; }}
+            border-radius: 0px; }}
+        QProgressBar#progress::chunk {{ background: {T['blue_hi']};
+            border-radius: 0px; }}
         """
         self.setStyleSheet(sheet)
         if hasattr(self, "anim_orb"):   # apply_theme läuft schon vor dem Bau der Karte
-            self.anim_orb.set_colors([T['blue'], T['text'], T['sec']])
+            self.anim_orb.set_colors([T['blue_hi'], T['text'], T['sec']])
         self.hairline.setStyleSheet(f"background: {T['line']};")
         for card in (self.card_matrix, self.card_ops, self.card_hist,
                      self.card_result, self.card_wolfram, self.card_anim):
             card.restyle()
         if self.anim_ready:
             self.player.restyle()
-        for name in ("page_methods", "page_vectors"):
+        for name in ("page_methods", "page_vectors", "page_maps"):
             page = getattr(self, name, None)
             if page is not None:
                 page.restyle()
@@ -4099,10 +4544,10 @@ class MainWindow(QMainWindow):
 
     def set_page(self, index: int):
         """
-        Zwischen Gauss, Verfahren und Vektoren umschalten.
+        Zwischen Gauss, Verfahren, Vektoren und Abbildungen umschalten.
 
         Gauss gegen Gauss-Jordan betrifft nur die erste Seite; auf den
-        beiden anderen bleibt die Leiste stehen, aber blass und stumm.
+        anderen bleibt die Leiste stehen, aber blass und stumm.
         """
         self.stack.setCurrentIndex(index)
         self.seg_mode.set_enabled(index == 0)
@@ -4365,7 +4810,7 @@ class MainWindow(QMainWindow):
         WalkthroughDialog(self, self.matrix, self.decimal).exec()
 
     def show_help(self):
-        HelpDialog(self).exec()
+        (MapsHelpDialog if self.stack.currentIndex() == 3 else HelpDialog)(self).exec()
 
     def build_op(self) -> tuple[Operation | None, str]:
         if self.op_kind == "swap":
@@ -4619,7 +5064,7 @@ class MainWindow(QMainWindow):
             self.player.stop()
         if self.anim_dir is not None:
             shutil.rmtree(self.anim_dir, ignore_errors=True)
-        for page in (self.page_methods, self.page_vectors):
+        for page in (self.page_methods, self.page_vectors, self.page_maps):
             page.anim.shutdown()
         super().closeEvent(event)
 
@@ -4681,7 +5126,7 @@ class MainWindow(QMainWindow):
     def render_hint(self):
         if self.editing:
             self.hint.setStyleSheet(
-                f"#hint {{ background: {T['fill2']}; border-radius: 14px; }}")
+                f"#hint {{ background: {T['fill2']}; border-radius: 0px; }}")
             self.hint_op.setText("So geht es weiter")
             self.hint_op.setStyleSheet(f"color: {T['text']}; background: transparent;")
             self.hint_why.setText("Trage die Zahlen ein und starte das Umformen. "
@@ -4691,7 +5136,7 @@ class MainWindow(QMainWindow):
         nxt = self.matrix.next_step(self.jordan)
         if nxt is None:
             self.hint.setStyleSheet(
-                f"#hint {{ background: {T['green_soft']}; border-radius: 14px; }}")
+                f"#hint {{ background: {T['green_soft']}; border-radius: 0px; }}")
             form = "Reduzierte Zeilenstufenform" if self.jordan else "Zeilenstufenform"
             self.hint_op.setText(f"✓  {form} erreicht")
             self.hint_op.setStyleSheet(
@@ -4700,7 +5145,7 @@ class MainWindow(QMainWindow):
             self.btn_hint.hide()
             return
         self.hint.setStyleSheet(
-            f"#hint {{ background: {T['fill2']}; border-radius: 14px; }}")
+            f"#hint {{ background: {T['fill2']}; border-radius: 0px; }}")
         self.hint_op.setText(f"Vorschlag:  {nxt}")
         self.hint_op.setStyleSheet(f"color: {T['text']}; background: transparent;")
         self.hint_why.setText(nxt.reason)
@@ -4866,12 +5311,12 @@ class MainWindow(QMainWindow):
         if op is None:
             self.preview.setText(err)
             self.preview.setStyleSheet(
-                f"#preview {{ background: {T['fill2']}; border-radius: 14px;"
+                f"#preview {{ background: {T['fill2']}; border-radius: 0px;"
                 f"padding: 13px 15px; color: {T['ter']}; }}")
         else:
             self.preview.setText(str(op))
             self.preview.setStyleSheet(
-                f"#preview {{ background: {T['fill2']}; border-radius: 14px;"
+                f"#preview {{ background: {T['fill2']}; border-radius: 0px;"
                 f"padding: 13px 15px; color: {T['text']}; }}")
 
     def update_buttons(self):
