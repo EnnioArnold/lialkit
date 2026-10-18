@@ -45,9 +45,9 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFrame,
 
 # Manim ist freiwillig: fehlt es, sagt die Animationskarte, was zu tun ist.
 # Dieser Ordner ist selbst das Paket `lialkit` — auch dann, wenn er nach dem
-# GitHub-Download »lialkit-main« heisst oder man direkt `python3 gauss_qt.py`
+# GitHub-Download »lialkit-main« heisst oder man direkt `python3 app/lialkit_qt.py`
 # darin aufruft. Darum hier von Hand als Paket anmelden, vor allen Importen.
-_HERE = os.path.dirname(os.path.abspath(__file__))
+_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if "lialkit" not in sys.modules:
     import importlib.util as _ilu
     _spec = _ilu.spec_from_file_location(
@@ -56,10 +56,9 @@ if "lialkit" not in sys.modules:
     _pkg = _ilu.module_from_spec(_spec)
     sys.modules["lialkit"] = _pkg
     _spec.loader.exec_module(_pkg)
-# gauss_anim liegt neben dieser Datei.
-sys.path.insert(0, _HERE)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # orb liegt neben dieser Datei
 try:
-    import gauss_anim
+    from lialkit.grafik import anim as gauss_anim
     ANIM_IMPORT_ERROR = ""
 except Exception as _exc:                                    # pragma: no cover
     gauss_anim = None
@@ -86,10 +85,10 @@ except Exception as _exc:                                    # pragma: no cover
 # So gibt es nur eine Stelle, an der die Verfahren stehen, und ein Fehler
 # kann sich nicht in einer der beiden Oberflächen verstecken.
 
-from lialkit.core import (MINUS, Num, Operation, Vector, fmt, fmt_factor,
+from lialkit.rechnen.core import (MINUS, Num, Operation, Vector, fmt, fmt_factor,
                           parse_number, tex_number)
-from lialkit.core import Matrix as _CoreMatrix
-from lialkit.determinant import det as _det
+from lialkit.rechnen.core import Matrix as _CoreMatrix
+from lialkit.rechnen.determinant import det as _det
 
 
 class Matrix(_CoreMatrix):
@@ -627,9 +626,9 @@ def run_methods_checks(appid: str, A, method: str,
     selbst exakt nach, und Wolfram liefert mit Determinante und Stufenform
     eine unabhängige Gegenprobe.
     """
-    from lialkit.determinant import det as _det_of
-    from lialkit.factor import lu as _lu
-    from lialkit.inverse import inverse as _inverse
+    from lialkit.rechnen.determinant import det as _det_of
+    from lialkit.rechnen.factor import lu as _lu
+    from lialkit.rechnen.inverse import inverse as _inverse
 
     report = WolframReport()
     rows = [list(row) for row in A.rows]
@@ -735,14 +734,14 @@ def run_vector_checks(appid: str, op: str, u, v, w,
         query = f"Det[{matrix_literal(rows)}]"
         report.url = browser_url(query)
         answers = _ask(appid, {"q": query})
-        from lialkit.vectors import spat as _spat
+        from lialkit.rechnen.vectors import spat as _spat
         _compare(report, "Spatprodukt", _spat(u, v, w).value, answers["q"],
                  wolfram_number, lambda x: fmt(x, decimal))
     elif op == "angle":
         query = f"VectorAngle[{lit(u)},{lit(v)}] in degrees"
         report.url = browser_url(query)
         answers = _ask(appid, {"q": query})
-        from lialkit.vectors import angle as _angle
+        from lialkit.rechnen.vectors import angle as _angle
         ours = float(_angle(u, v).degrees)
         ans = answers["q"]
         if isinstance(ans, Exception):
@@ -792,23 +791,22 @@ def run_vector_checks(appid: str, op: str, u, v, w,
 # Farben und Schriften
 # ==========================================================================
 
-# Geist-Palette (Werte aus dem Skill vercel-geist-design-system): Schwarz/Weiss,
-# Graustufen, ein Akzentblau für Links und Fokus.
+# Swiss Style (claude-design-styles): Schwarz/Weiss, ein Rot, keine Rundungen.
 LIGHT = dict(
-    bg="#ffffff", nav="#fafafa", card="#ffffff", text="#171717", sec="#4d4d4d",
-    ter="#8f8f8f", line="#eaeaea", hair="#f2f2f2", fill="#f2f2f2", fill2="#fafafa",
-    seg="#ffffff", blue="#006bff", blue_hi="#0059ec", blue_soft="#e9f4ff",
-    green="#18794e", green_soft="#e6f4ec", red="#e5484d", red_soft="#fdecec",
+    bg="#ffffff", nav="#ffffff", card="#ffffff", text="#000000", sec="#333333",
+    ter="#666666", line="#000000", hair="#cccccc", fill="#f4f4f4", fill2="#f4f4f4",
+    seg="#ffffff", blue="#000000", blue_hi="#e60000", blue_soft="#f4f4f4",
+    green="#18794e", green_soft="#e6f4ec", red="#e60000", red_soft="#fdecec",
     amber="#ab5200", amber_soft="#fff4e0", flash="#fff3c4",
-    entry="#ffffff", shadow=20, dark=False)
+    entry="#ffffff", shadow=0, dark=False)
 
 DARK = dict(
-    bg="#000000", nav="#0a0a0a", card="#0a0a0a", text="#ededed", sec="#a0a0a0",
-    ter="#7d7d7d", line="#2e2e2e", hair="#1f1f1f", fill="#1a1a1a", fill2="#111111",
-    seg="#282828", blue="#006efe", blue_hi="#3291ff", blue_soft="#06193a",
-    green="#46a758", green_soft="#102a16", red="#e5484d", red_soft="#3a1516",
+    bg="#000000", nav="#000000", card="#000000", text="#ffffff", sec="#cccccc",
+    ter="#888888", line="#ffffff", hair="#333333", fill="#1a1a1a", fill2="#111111",
+    seg="#333333", blue="#e60000", blue_hi="#ff3333", blue_soft="#2a0000",
+    green="#46a758", green_soft="#102a16", red="#ff3333", red_soft="#2a0000",
     amber="#ffb224", amber_soft="#3a2a0a", flash="#3d3210",
-    entry="#0a0a0a", shadow=60, dark=True)
+    entry="#000000", shadow=0, dark=True)
 
 T: dict = dict(LIGHT)
 
@@ -823,11 +821,9 @@ def pick_font(candidates: Sequence[str], fallback: str) -> str:
 
 class Fonts:
     def __init__(self):
-        ui = pick_font(["Geist", "Inter", "SF Pro Text", ".AppleSystemUIFont",
-                        "Helvetica Neue", "Segoe UI Variable Text", "Segoe UI",
+        ui = pick_font(["Helvetica Neue", "Helvetica", "Arial", "SF Pro Text", ".AppleSystemUIFont", "Segoe UI Variable Text", "Segoe UI",
                         "DejaVu Sans"], "Sans Serif")
-        display = pick_font(["Geist", "Inter", "SF Pro Display", "SF Pro Text",
-                             "Helvetica Neue", "Segoe UI Variable Display",
+        display = pick_font(["Helvetica Neue", "Helvetica", "Arial", "SF Pro Display", "SF Pro Text", "Segoe UI Variable Display",
                              "Segoe UI", "DejaVu Sans"], ui)
         mono = pick_font(["SF Mono", "Menlo", "Cascadia Mono", "Consolas",
                           "DejaVu Sans Mono"], "Monospace")
@@ -890,7 +886,7 @@ def qcolor(key: str) -> QColor:
 
 
 class Card(QFrame):
-    """Fläche mit runden Ecken und weichem Schatten."""
+    """Eckige Fläche mit schwarzer Linie, ohne Schatten."""
 
     def __init__(self, parent=None, pad: int = 26):
         super().__init__(parent)
@@ -898,15 +894,9 @@ class Card(QFrame):
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(pad, pad, pad, pad)
         self.lay.setSpacing(0)
-        self.shadow = QGraphicsDropShadowEffect(self)
-        self.setGraphicsEffect(self.shadow)
-        self.restyle()
 
     def restyle(self):
-        self.shadow.setBlurRadius(30)
-        self.shadow.setXOffset(0)
-        self.shadow.setYOffset(4)
-        self.shadow.setColor(QColor(0, 0, 0, T["shadow"] // (3 if T["dark"] else 1)))
+        pass                      # Swiss: kein Schatten, die Linie kommt aus dem Stylesheet
 
 
 class Segmented(QWidget):
@@ -933,14 +923,14 @@ class Segmented(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
         p.setBrush(qcolor("fill2") if not self.enabled else qcolor("fill"))
-        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 9, 9)
+        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 0, 0)
         p.setFont(self.font_)
         for i, label in enumerate(self.options):
             box = QRectF(3 + i * self.seg_w, 3, self.seg_w, self.height() - 6)
             if i == self.value:
                 p.setBrush(qcolor("fill") if not self.enabled else qcolor("seg"))
                 p.setPen(Qt.NoPen)
-                p.drawRoundedRect(box, 7, 7)
+                p.drawRoundedRect(box, 0, 0)
             if not self.enabled:
                 p.setPen(qcolor("ter"))
             else:
@@ -992,7 +982,7 @@ class Stepper(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
         p.setBrush(qcolor("fill"))
-        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 15, 15)
+        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 0, 0)
         p.setFont(self.font_)
         p.setPen(qcolor("text"))
         h = self.height()
@@ -1098,7 +1088,7 @@ class Badge(QLabel):
     def restyle(self):
         self.setStyleSheet(
             f"color: {T[self.fg]}; background: {T[self.bg]};"
-            f"border-radius: 11px; padding: 4px 14px;")
+            f"border-radius: 0px; padding: 4px 14px;")
 
 
 def restyle_labels(root: QWidget):
@@ -1413,7 +1403,7 @@ class HistoryRow(QFrame):
         dot.setStyleSheet(
             f"color: {'#ffffff' if current else T['sec']};"
             f"background: {T['blue'] if current else T['fill']};"
-            f"border-radius: 12px;")
+            f"border-radius: 0px;")
         lay.addWidget(dot)
         lay.addWidget(label(text, 11))
         lay.addStretch(1)
@@ -1444,13 +1434,8 @@ class Toast(QFrame):
         lay.addWidget(self.label)
         self.setFixedHeight(self.HEIGHT)
         self.setStyleSheet(
-            f"#toast {{ background: {T['card']}; border-radius: {self.HEIGHT // 2}px;"
+            f"#toast {{ background: {T['card']}; border-radius: 0px;"
             f"border: 1px solid {T['line']}; }}")
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(26)
-        shadow.setYOffset(5)
-        shadow.setColor(QColor(0, 0, 0, 60 if not T["dark"] else 150))
-        self.setGraphicsEffect(shadow)
         self.adjustSize()
         self.setFixedWidth(max(180, self.label.sizeHint().width() + 40))
 
@@ -1636,7 +1621,7 @@ class WalkthroughDialog(QDialog):
         card = QFrame()
         card.setObjectName("stepcard")
         card.setStyleSheet(
-            f"#stepcard {{ background: {T['card']}; border-radius: 16px;"
+            f"#stepcard {{ background: {T['card']}; border-radius: 0px;"
             f"border: 1px solid {T['hair']}; }}")
         lay = QVBoxLayout(card)
         lay.setContentsMargins(18, 16, 18, 16)
@@ -1707,7 +1692,7 @@ class ResultView(QScrollArea):
         box = QFrame()
         box.setObjectName("errbox")
         box.setStyleSheet(f"#errbox {{ background: {T['red_soft']};"
-                          f"border-radius: 12px; }}")
+                          f"border-radius: 0px; }}")
         bl = QVBoxLayout(box)
         bl.setContentsMargins(16, 13, 16, 13)
         bl.addWidget(wrapped(message, 460, 12, "red"))
@@ -1733,7 +1718,7 @@ class ResultView(QScrollArea):
             box = QFrame()
             box.setObjectName("warnbox")
             box.setStyleSheet(f"#warnbox {{ background: {T['amber_soft']};"
-                              f"border-radius: 10px; }}")
+                              f"border-radius: 0px; }}")
             bl = QVBoxLayout(box)
             bl.setContentsMargins(14, 10, 14, 10)
             bl.addWidget(wrapped(warning, 460, 11, "amber"))
@@ -1747,12 +1732,12 @@ class ResultView(QScrollArea):
         self.lay.addStretch(1)
 
     def _step_card(self, index: int, step, decimal: bool) -> QWidget:
-        from lialkit.render import tex_to_text
+        from lialkit.rechnen.render import tex_to_text
 
         card = QFrame()
         card.setObjectName("stepcard")
         card.setStyleSheet(f"#stepcard {{ background: {T['fill2']};"
-                           f"border-radius: 14px; }}")
+                           f"border-radius: 0px; }}")
         lay = QVBoxLayout(card)
         lay.setContentsMargins(16, 13, 16, 13)
         lay.setSpacing(5)
@@ -1775,7 +1760,7 @@ class ResultView(QScrollArea):
         card = QFrame()
         card.setObjectName("rescard")
         card.setStyleSheet(f"#rescard {{ background: {T['blue_soft']};"
-                           f"border-radius: 14px; }}")
+                           f"border-radius: 0px; }}")
         lay = QHBoxLayout(card)
         lay.setContentsMargins(16, 13, 16, 13)
         lay.setSpacing(20)
@@ -1785,8 +1770,8 @@ class ResultView(QScrollArea):
         return card
 
     def _item(self, name: str, obj, decimal: bool, big: bool = False):
-        from lialkit.core import Matrix as CoreMatrix, Vector as CoreVector
-        from lialkit.render import tex_to_text
+        from lialkit.rechnen.core import Matrix as CoreMatrix, Vector as CoreVector
+        from lialkit.rechnen.render import tex_to_text
 
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -2021,7 +2006,7 @@ class MethodsPage(QWidget):
     # -- Rechnen ----------------------------------------------------------
 
     def matrix(self):
-        from lialkit.core import Matrix as CoreMatrix
+        from lialkit.rechnen.core import Matrix as CoreMatrix
         self.read_fields()
         rows = []
         for r in self.draft:
@@ -2032,10 +2017,10 @@ class MethodsPage(QWidget):
         return CoreMatrix(rows)
 
     def compute(self):
-        from lialkit.determinant import det
-        from lialkit.factor import lu
-        from lialkit.inverse import inverse
-        from lialkit.solving import rank
+        from lialkit.rechnen.determinant import det
+        from lialkit.rechnen.factor import lu
+        from lialkit.rechnen.inverse import inverse
+        from lialkit.rechnen.solving import rank
 
         try:
             A = self.matrix()
@@ -2075,9 +2060,9 @@ class MethodsPage(QWidget):
         dort gibt es nichts zu animieren, und der Text sagt das statt einen
         Film zu zeigen, der nichts erklärt.
         """
-        from lialkit.factor import lu
-        from lialkit.inverse import inverse
-        from lialkit.solving import rank
+        from lialkit.rechnen.factor import lu
+        from lialkit.rechnen.inverse import inverse
+        from lialkit.rechnen.solving import rank
 
         if self.method == "det":
             return ("Die Determinante entsteht ohne Zwischenmatrizen — "
@@ -2109,7 +2094,7 @@ class MethodsPage(QWidget):
         Bei 3×3 die drei Spalten als Vektoren mit dem Spat, dessen Volumen
         |det A| ist. Grössere Matrizen lassen sich nicht zeichnen.
         """
-        from lialkit import plots
+        from lialkit.grafik import plots
 
         try:
             A = self.matrix()
@@ -2948,13 +2933,13 @@ class VectorsPage(QWidget):
         self.anim.refresh()
 
     def vectors(self):
-        from lialkit.core import Vector as CoreVector
+        from lialkit.rechnen.core import Vector as CoreVector
         self.read_fields()
         return [CoreVector([parse_number(v) for v in row])
                 for row in self.values]
 
     def compute(self):
-        from lialkit.vectors import (add, angle, cross, dot, position,
+        from lialkit.rechnen.vectors import (add, angle, cross, dot, position,
                                      projection, scale, spat)
         try:
             u, v, w = self.vectors()
@@ -3002,7 +2987,7 @@ class VectorsPage(QWidget):
         Beim Vektorprodukt und bei der Projektion gehört das Ergebnis mit
         ins Bild — erst dann zeigt die Animation, worum es geht.
         """
-        from lialkit.vectors import angle, dot, spat
+        from lialkit.rechnen.vectors import angle, dot, spat
 
         if self.op in ("add", "position", "scale"):
             return ("Für diese Rechnung gibt es keine Animation — "
@@ -3042,9 +3027,9 @@ class VectorsPage(QWidget):
 
     def figure(self, interactive: bool):
         """Baut die Zeichnung zur gerade gewählten Rechnung."""
-        from lialkit import plots
+        from lialkit.grafik import plots
 
-        from lialkit.core import Vector as CoreVector
+        from lialkit.rechnen.core import Vector as CoreVector
 
         u, v, w = self.vectors()
         zero = CoreVector([0] * self.dim)
@@ -3225,7 +3210,7 @@ class HelpDialog(QDialog):
             box = QFrame()
             box.setObjectName("helpbox")
             box.setStyleSheet(
-                f"#helpbox {{ background: {T['fill2']}; border-radius: 14px; }}")
+                f"#helpbox {{ background: {T['fill2']}; border-radius: 0px; }}")
             bl = QVBoxLayout(box)
             bl.setContentsMargins(16, 13, 16, 13)
             bl.setSpacing(4)
@@ -3374,7 +3359,7 @@ class MoviePlayer(QWidget):
         self.screen = QLabel()
         self.screen.setAlignment(Qt.AlignCenter)
         self.screen.setStyleSheet(
-            f"background: {T['fill2']}; border-radius: 12px;")
+            f"background: {T['fill2']}; border-radius: 0px;")
         self.stage.addWidget(self.screen)
 
         self.video = None
@@ -3573,7 +3558,7 @@ class MoviePlayer(QWidget):
 
     def restyle(self):
         self.screen.setStyleSheet(
-            f"background: {T['fill2']}; border-radius: 12px;")
+            f"background: {T['fill2']}; border-radius: 0px;")
         self._paint_video_background()
 
 
@@ -4033,21 +4018,21 @@ class MainWindow(QMainWindow):
         QMainWindow, #page, QStackedWidget {{ background: {T['bg']}; }}
         QScrollArea {{ background: transparent; }}
         #nav {{ background: {T['nav']}; }}
-        #card {{ background: {T['card']}; border-radius: 12px;
+        #card {{ background: {T['card']}; border-radius: 0px;
                  border: 1px solid {T['line']}; }}
-        #hint, #preview {{ background: {T['fill2']}; border-radius: 14px; }}
+        #hint, #preview {{ background: {T['fill2']}; border-radius: 0px; }}
         #preview {{ padding: 13px 15px; color: {T['text']}; }}
-        #histhost {{ background: {T['fill2']}; border-radius: 14px; }}
-        #histrow {{ background: transparent; border-radius: 10px; }}
+        #histhost {{ background: {T['fill2']}; border-radius: 0px; }}
+        #histrow {{ background: transparent; border-radius: 0px; }}
         #histrow:hover {{ background: {T['fill']}; }}
-        #histrow_on {{ background: {T['blue_soft']}; border-radius: 10px; }}
+        #histrow_on {{ background: {T['blue_soft']}; border-radius: 0px; }}
         QPushButton#primary {{ background: {T['text']}; color: {T['bg']};
-            border: none; border-radius: 6px; padding: 0 22px; }}
+            border: none; border-radius: 0px; padding: 0 22px; }}
         QPushButton#primary:hover {{ background: {T['sec']}; }}
         QPushButton#primary:disabled {{ background: {T['fill']};
             color: {T['ter']}; }}
         QPushButton#secondary {{ background: transparent; color: {T['text']};
-            border: 1px solid {T['line']}; border-radius: 6px; padding: 0 18px; }}
+            border: 1px solid {T['line']}; border-radius: 0px; padding: 0 18px; }}
         QPushButton#secondary:hover {{ background: {T['fill']}; }}
         QPushButton#secondary:disabled {{ color: {T['ter']}; }}
         QPushButton#plain {{ background: transparent; color: {T['blue']};
@@ -4055,30 +4040,30 @@ class MainWindow(QMainWindow):
         QPushButton#plain:hover {{ text-decoration: underline; }}
         QPushButton#plain:disabled {{ color: {T['ter']}; }}
         QPushButton#dropdown {{ background: {T['fill']}; color: {T['text']};
-            border: none; border-radius: 9px; padding: 0 10px; text-align: left; }}
+            border: none; border-radius: 0px; padding: 0 10px; text-align: left; }}
         QPushButton#dropdown:hover {{ background: {T['line']}; }}
         QLineEdit#cell {{ background: {T['entry']}; color: {T['text']};
-            border: 1px solid {T['line']}; border-radius: 11px; padding: 0 6px;
+            border: 1px solid {T['line']}; border-radius: 0px; padding: 0 6px;
             selection-background-color: {T['blue']}; }}
         QLineEdit#cell:focus {{ border: 2px solid {T['blue']}; }}
         QMenu {{ background: {T['card']}; color: {T['text']};
-            border: 1px solid {T['line']}; border-radius: 10px; padding: 5px; }}
-        QMenu::item {{ padding: 6px 22px; border-radius: 6px; }}
+            border: 1px solid {T['line']}; border-radius: 0px; padding: 5px; }}
+        QMenu::item {{ padding: 6px 22px; border-radius: 0px; }}
         QMenu::item:selected {{ background: {T['blue']}; color: #ffffff; }}
         QScrollBar:vertical {{ background: transparent; width: 12px; margin: 2px; }}
         QScrollBar::handle:vertical {{ background: {T['line']};
-            border-radius: 5px; min-height: 40px; }}
+            border-radius: 0px; min-height: 40px; }}
         QScrollBar::handle:vertical:hover {{ background: {T['ter']}; }}
         QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
         QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
         QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 2px; }}
         QScrollBar::handle:horizontal {{ background: {T['line']};
-            border-radius: 5px; min-width: 40px; }}
+            border-radius: 0px; min-width: 40px; }}
         QDialog {{ background: {T['card']}; }}
         QProgressBar#progress {{ background: {T['fill']}; border: none;
-            border-radius: 3px; }}
+            border-radius: 0px; }}
         QProgressBar#progress::chunk {{ background: {T['blue']};
-            border-radius: 3px; }}
+            border-radius: 0px; }}
         """
         self.setStyleSheet(sheet)
         if hasattr(self, "anim_orb"):   # apply_theme läuft schon vor dem Bau der Karte
@@ -4681,7 +4666,7 @@ class MainWindow(QMainWindow):
     def render_hint(self):
         if self.editing:
             self.hint.setStyleSheet(
-                f"#hint {{ background: {T['fill2']}; border-radius: 14px; }}")
+                f"#hint {{ background: {T['fill2']}; border-radius: 0px; }}")
             self.hint_op.setText("So geht es weiter")
             self.hint_op.setStyleSheet(f"color: {T['text']}; background: transparent;")
             self.hint_why.setText("Trage die Zahlen ein und starte das Umformen. "
@@ -4691,7 +4676,7 @@ class MainWindow(QMainWindow):
         nxt = self.matrix.next_step(self.jordan)
         if nxt is None:
             self.hint.setStyleSheet(
-                f"#hint {{ background: {T['green_soft']}; border-radius: 14px; }}")
+                f"#hint {{ background: {T['green_soft']}; border-radius: 0px; }}")
             form = "Reduzierte Zeilenstufenform" if self.jordan else "Zeilenstufenform"
             self.hint_op.setText(f"✓  {form} erreicht")
             self.hint_op.setStyleSheet(
@@ -4700,7 +4685,7 @@ class MainWindow(QMainWindow):
             self.btn_hint.hide()
             return
         self.hint.setStyleSheet(
-            f"#hint {{ background: {T['fill2']}; border-radius: 14px; }}")
+            f"#hint {{ background: {T['fill2']}; border-radius: 0px; }}")
         self.hint_op.setText(f"Vorschlag:  {nxt}")
         self.hint_op.setStyleSheet(f"color: {T['text']}; background: transparent;")
         self.hint_why.setText(nxt.reason)
@@ -4866,12 +4851,12 @@ class MainWindow(QMainWindow):
         if op is None:
             self.preview.setText(err)
             self.preview.setStyleSheet(
-                f"#preview {{ background: {T['fill2']}; border-radius: 14px;"
+                f"#preview {{ background: {T['fill2']}; border-radius: 0px;"
                 f"padding: 13px 15px; color: {T['ter']}; }}")
         else:
             self.preview.setText(str(op))
             self.preview.setStyleSheet(
-                f"#preview {{ background: {T['fill2']}; border-radius: 14px;"
+                f"#preview {{ background: {T['fill2']}; border-radius: 0px;"
                 f"padding: 13px 15px; color: {T['text']}; }}")
 
     def update_buttons(self):
