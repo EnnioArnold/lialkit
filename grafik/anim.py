@@ -11,12 +11,12 @@ Installation:
     pip install manim
 
 Verwendung aus der App:
-    from gauss_anim import AnimationJob, render
+    from anim import AnimationJob, render
     job = AnimationJob(frames=[...], captions=[...], ...)
     pfad = render(job, progress=print)
 
 Direkt von der Kommandozeile (rendert ein Beispiel):
-    python3 gauss_anim.py
+    python3 anim.py
 """
 
 from __future__ import annotations
@@ -799,12 +799,12 @@ SCENE_NAMES = {"step": "StepScene", "full": "FullScene", "pivots": "PivotScene",
 _RUNNER = '''
 import os, sys
 sys.path.insert(0, {app_dir!r})
-from gauss_anim import SCENE_NAMES
+from anim import SCENE_NAMES
 
 if {vectors!r}:
-    from gauss_anim import _build_vector_scenes as _build
+    from anim import _build_vector_scenes as _build
 else:
-    from gauss_anim import _build_scenes as _build
+    from anim import _build_scenes as _build
 
 # Die Klassen entstehen erst zur Laufzeit; Manim sucht sie aber als
 # Modulinhalt. Darum hier unter ihrem Namen ablegen und das Modul umbiegen.
