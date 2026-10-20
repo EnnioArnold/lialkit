@@ -3,8 +3,8 @@
 Manim-Animationen zur linearen Algebra: Gauss-Elimination, Pivots,
 Vektorprodukte.
 
-Swiss Style wie die App: Schwarz/Weiss mit einem Rot (#e60000), keine
-Rundungen, schlichte Linien, Helvetica-artige Schrift.
+Look wie bei 3Blue1Brown: schwarzer Grund, die Manim-Farben Blau, Gelb,
+Grün und Rot, Serifenschrift (am nächsten an Computer Modern).
 
 Engine: manimgx wird bevorzugt (schnell, bringt die Videoausgabe selbst mit,
 kein ffmpeg und kein Cairo/Pango nötig). Ist es nicht installiert, fällt
@@ -56,20 +56,14 @@ QUALITIES = {
 
 @dataclass
 class Theme:
-    """Farben der Animation: Swiss Style, Schwarz/Weiss mit einem Rot."""
-    background: str = "#ffffff"
-    text: str = "#000000"
-    muted: str = "#666666"
-    accent: str = "#e60000"
-    highlight: str = "#f2f2f2"     # Zeilenband bei einer Operation
-    pivot: str = "#e60000"         # Pivotfeld (wird halbtransparent gefüllt)
-    good: str = "#000000"          # Lösungszeilen
-
-    @staticmethod
-    def dark() -> "Theme":
-        return Theme(background="#000000", text="#ffffff", muted="#999999",
-                     accent="#ff3333", highlight="#1a1a1a", pivot="#ff3333",
-                     good="#ffffff")
+    """Farben der Animation: die Palette von 3Blue1Brown auf Schwarz."""
+    background: str = "#000000"
+    text: str = "#ffffff"
+    muted: str = "#888888"         # GREY_B
+    accent: str = "#ffff00"        # YELLOW: Hervorhebung, Bögen, Flächen
+    highlight: str = "#1c3a45"     # Zeilenband bei einer Operation
+    pivot: str = "#58c4dd"         # BLUE: Pivotfeld (wird halbtransparent gefüllt)
+    good: str = "#83c167"          # GREEN: Lösungszeilen
 
 
 @dataclass
@@ -343,15 +337,16 @@ INSTALL_HINT = ("pip install manimgx   # Rendering und Videoausgabe in einem Pak
 
 
 def _pick_font() -> str | None:
-    """Eine Helvetica-artige Schrift, die auf dem Rechner da ist (sonst der Standard der Engine)."""
+    """Eine Serifenschrift im Stil von Computer Modern, die auf dem Rechner da ist (sonst der Standard der Engine)."""
     if engine() == "manimgx":
-        return "Noto Sans"                         # bringt manimgx selbst mit
+        return "Noto Serif"                        # bringt manimgx selbst mit
     try:
         import manimpango
         have = set(manimpango.list_fonts())
     except Exception:
         return None
-    for name in ("Helvetica Neue", "Helvetica", "Arial", "Inter", "DejaVu Sans"):
+    for name in ("CMU Serif", "Latin Modern Roman", "STIX Two Text", "Georgia",
+                 "Times New Roman", "DejaVu Serif"):
         if name in have:
             return name
     return None
@@ -372,6 +367,24 @@ def _swiss_text(Text):
     return text
 
 
+def _math_text(mod, Text):
+    """Zahlen und Gleichungen als LaTeX setzen, wo die Engine das selbst kann
+    (manimgx); sonst bleibt es Text, damit keine TeX-Installation nötig wird."""
+    if engine() != "manimgx":
+        return Text
+
+    def tex(value, **kw):
+        src = value.replace("\u2212", "-")
+        src = re.sub(r"(\d+)/(\d+)", r"\\tfrac{\1}{\2}", src)
+        src = re.sub(r"\b([a-zA-Z])(\d+)\b", r"\1_{\2}", src)
+        kw.pop("font", None)
+        try:
+            return mod.MathTex(src, **kw)
+        except Exception:                       # Zelle ist kein Formelsatz
+            return Text(value, **kw)
+    return tex
+
+
 def _build_scenes():
     """
     Erzeugt die Szenenklassen erst beim Aufruf, damit das Modul auch ohne
@@ -384,6 +397,7 @@ def _build_scenes():
                 "Scene VGroup VMobject Rectangle FadeIn FadeOut FadeTransform "
                 "Transform Write DOWN UP ORIGIN").split())
     Text = _swiss_text(mod.Text)
+    Math = _math_text(mod, Text)
 
     class MatrixBoard(VGroup):
         """Die erweiterte Matrix: Zellen, Klammern, Trennlinie."""
@@ -408,7 +422,7 @@ def _build_scenes():
             self.cells = VGroup()
             for r, row in enumerate(rows):
                 for c, value in enumerate(row):
-                    t = Text(value, font_size=font_size, color=theme.text)
+                    t = Math(value, font_size=font_size, color=theme.text)
                     t.move_to(self.cell_center(r, c))
                     self.cells.add(t)
 
@@ -602,7 +616,7 @@ def _build_scenes():
                 self.wait(0.3)
                 self.play(FadeOut(counter), run_time=0.3)
                 lines = VGroup(*[
-                    Text(line, font_size=int(self.font_size * 0.8),
+                    Math(line, font_size=int(self.font_size * 0.8),
                          color=self.theme.good) for line in self.job.solution])
                 lines.arrange(DOWN, buff=0.18)
                 lines.next_to(board, UP, buff=0.45)
@@ -668,7 +682,7 @@ def _build_vector_scenes():
     import numpy as np
 
     #: Farben der einzelnen Vektoren, in dieser Reihenfolge vergeben.
-    PALETTE = ["#000000", "#666666", "#e60000", "#999999"]
+    PALETTE = ["#58c4dd", "#ffff00", "#83c167", "#fc6255"]
 
     class VectorScene(ThreeDScene):
         """Grundlage: Achsen, Vektoren, Beschriftung, Kamerafahrt."""
