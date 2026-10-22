@@ -1,8 +1,8 @@
 # lialkit
 
 Lineare Algebra mit nachvollziehbarem Rechenweg, gebaut zum Modul
-I.BA_LIAL_MM.20 der HSLU. Deckt die Semesterwochen 1 bis 5 ab: Gauss, LR-Zerlegung,
-Inverse und Determinante, Vektorrechnung und lineare Abbildungen.
+I.BA_LIAL_MM.20 der HSLU. Deckt die Semesterwochen 1 bis 6 ab: Gauss, LR-Zerlegung,
+Inverse und Determinante, Vektorrechnung und lineare Abbildungen (SW5 und SW6).
 
 ## Installieren
 
@@ -36,7 +36,7 @@ nicht auseinanderlaufen.
 ```
 app/        das Fenster (lialkit_qt.py)
 rechnen/    Rechenkern: core, render, solving, factor, inverse, determinant,
-            vectors und abbildung (SW5)
+            vectors und abbildung (SW5/6)
 grafik/     Zeichnungen (plots, plots_abbildung) und Animationen (anim)
 aufgaben/   Übungsaufgaben (exercises) und Vorlage zum Selbstprüfen (uebung)
 docs/       Architektur-Diagramm
@@ -46,7 +46,7 @@ tests/      ein Testskript je Modul
 Im Notebook bleiben die kurzen Namen: `import lialkit as lk`,
 `from lialkit.exercises import liste`, `lialkit.anim` und so weiter.
 
-## Lineare Abbildungen (SW5)
+## Lineare Abbildungen (SW5, SW6)
 
 ```python
 lk.drehung(30)                         # Matrix der Drehung um 30°
@@ -56,6 +56,20 @@ lk.zusammensetzen(A, B)                # erst A, dann B, also B·A
 lk.finde_abbildung([(0,0),(1,0),(1,1),(0,1),(0,0)])   # Matrix aus der Bildfigur
 lk.plot_abbildung(A)                   # Original rot, Bild schwarz
 ```
+
+**SW6** behandelt denselben Stoff wie SW5 (gleiche Folien, gleiches Blatt, nur
+das Datum ist ein anderes). Neu im Kit sind zwei Wünsche aus den Notizen:
+
+```python
+lk.transponierte_abbildung(A, P)       # was A^T mit denselben Punkten macht
+lk.plot_abbildung(A, [(0,0),(2,1),(3,3)], transponiert=True)   # eigene Punkte, A^T gestrichelt
+```
+
+Die Zeilen von A sind die Spalten von A^T. Der Rechenweg ordnet ein: Ist A
+symmetrisch, sind A und A^T dieselbe Abbildung; bei Drehungen und Spiegelungen
+ist A^T die Umkehrung. Die Fläche (|det|) bleibt gleich. Im Fenster gibt es
+unter »Abbildungen« die Rechnung »Transponierte« und das Objekt »Eigene«, in
+das du Punkte wie `(0,0) (2,1) (3,3)` tippst.
 
 `finde_abbildung` löst Aufgabe 1 vom Blatt: Es liest A aus den Bildern von e₁ und
 e₂ ab, prüft die Ecke (1,1) und begründet sonst, warum es keine lineare Abbildung
@@ -77,13 +91,14 @@ sie exakt: `|(3,4)| = 5`, nicht `5.0000`.
 ```python
 from lialkit.exercises import liste, aufgabe, loese
 
-liste('SW5')          # welche es gibt (SW1 bis SW5)
+liste('SW6')          # welche es gibt (SW1 bis SW6)
 aufgabe('SW3.1a')     # die Angabe
 loese('SW3.1a')       # durchgerechnet
 ```
 
-Enthalten sind die Aufgaben der Wochen 1 bis 5, zuletzt SW5.1a–e und SW5.2a/b
-(lineare Abbildungen).
+Enthalten sind die Aufgaben der Wochen 1 bis 6, zuletzt SW5.1a–e und SW5.2a/b
+(lineare Abbildungen). Das Blatt von SW6 ist dasselbe; es steht als
+SW6.1a–e und SW6.2a/b mit denselben Daten und Lösungen noch einmal da.
 
 **Eine Aufgabe ist bewusst offen gelassen:** SW3 Aufgabe 3 verlangt, dass
 du den LR-Algorithmus selbst programmierst. Dafür gibt es ein Gerüst mit
@@ -122,7 +137,8 @@ rotes Akzent, keine Rundungen), hell oder dunkel. Vier Ansichten:
 - **Verfahren** — LR-Zerlegung, Inverse, Determinante und Rang
 - **Vektoren** — Skalar-, Vektor- und Spatprodukt, Winkel, Projektion
 - **Abbildungen** — Skalierung, Drehung, Spiegelung, Scherung, Zusammensetzung;
-  aus der Bildfigur die Matrix ablesen
+  aus der Bildfigur die Matrix ablesen; Transponierte (SW6); eigene Punkte statt
+  Quadrat oder F
 
 Verfahren und Vektoren zeigen ihr Ergebnis als Karte mit drei Ansichten:
 **Rechenweg**, **Zeichnung** und **Animation**.
@@ -158,6 +174,10 @@ ist auf den anderen beiden ausgegraut.
 
 ## Geprüft gegen
 
+SW6: Folie 7 (Q = A·P mit f₁ = (3, −1)ᵀ, f₂ = (−1, 2)ᵀ) und die Musterlösung
+lial-sw-06-loesungen.pdf (Aufgabe 1a, 1c, 1d). Neu hinzugekommen ist nur die
+Transponierte.
+
 Die Ergebnisse sind Zahl für Zahl mit `lial-sw-04-loesungen.pdf` verglichen
 worden: Determinanten und Inversen der Aufgaben 1 und 2, einschliesslich
 der beiden singulären Matrizen. Die LR-Zerlegungen aus SW3 sind über
@@ -166,6 +186,6 @@ der beiden singulären Matrizen. Die LR-Zerlegungen aus SW3 sind über
 ## Tests
 
 ```bash
-python3 tests/tests_abbildung.py    # ebenso core, gauss, factor, inverse,
+python3 tests/tests_abbildung.py    # ebenso sw6, core, gauss, factor, inverse,
 python3 tests/tests_determinant.py  # vectors, exercises, plots, anim, app
 ```
