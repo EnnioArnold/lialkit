@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Die Übungsaufgaben aus den Semesterwochen 1 bis 5.
+Die Übungsaufgaben aus den Semesterwochen 1 bis 6.
 
 Die Aufgaben stehen hier als Daten, nicht als fertige Antworten. Du holst
 dir eine Aufgabe, rechnest selbst und vergleichst — das ist der Zweck.
@@ -246,6 +246,17 @@ for _key, _rule in (("a", "Rot(φ)·(F + T)"), ("b", "F + Rot(φ)·T")):
         {"F": BUCHSTABE_F_AUFGABE, "T": Vector([15, 0]),
          "phi": list(PHI_REIHE)}, f"rotationsreihe_{_key}",
         "Zeichnen: plot_rotationsreihe(variante)."))
+
+# -- Semesterwoche 6: dasselbe Blatt wie SW5 --------------------------------
+# lial-sw-06-uebungen.pdf und -loesungen.pdf sind inhaltlich gleich zu SW5
+# (nur das Datum ist ein anderes). Die Aufgaben stehen darum als SW6.* noch
+# einmal da, mit denselben Daten und Verfahren.
+
+for _k in [k for k in EXERCISES if k.startswith("SW5.")]:
+    _e = EXERCISES[_k]
+    _add(Exercise(_k.replace("SW5", "SW6", 1), "SW6", _e.title, _e.task,
+                  dict(_e.data), _e.method,
+                  (_e.note + " " if _e.note else "") + f"Dieselbe Aufgabe wie {_k}."))
 
 
 # ==========================================================================
