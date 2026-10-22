@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Zeichnungen zu SW 5 (lineare Abbildungen): Original und Bild, Basiswechsel
+Zeichnungen zu SW 5/6 (lineare Abbildungen): Original und Bild, Basiswechsel
 und die Drehreihen aus Aufgabe 2.
 
 Gestaltung wie in plots.py (Swiss Style): Schwarz/Weiss, das Original in
@@ -14,7 +14,8 @@ import math
 
 from ..rechnen.abbildung import (BASIS_FOLIE_6, BUCHSTABE_F_AUFGABE,
                                  BUCHSTABE_F_FOLIEN, EINHEITSQUADRAT, PHI_REIHE,
-                                 abbilden, punkte, rotationsreihe)
+                                 abbilden, punkte, rotationsreihe,
+                                 transponierte_abbildung)
 from ..rechnen.core import Matrix, Vector
 from .plots import INK, RED, _finish, _style_2d, _swiss
 
@@ -60,13 +61,16 @@ def _pfeil(ax, ziel, farbe, name: str, start=(0, 0)):
 
 
 @_swiss
-def plot_abbildung(A, P=None, titel: str = "", groesse: float = 5.5):
+def plot_abbildung(A, P=None, titel: str = "", groesse: float = 5.5,
+                   transponiert: bool = False):
     """
     Original (rot) und Bild (schwarz) einer Abbildung A, wie in der Musterlösung.
 
     P sind die Punkte spaltenweise (Standard: das Einheitsquadrat); ein
     Buchstabe wie BUCHSTABE_F_AUFGABE geht genauso. Eine 3×3-Matrix wirkt auf
     die homogenen Koordinaten; die Zeile mit den Einsen wird nicht gezeichnet.
+    P darf auch eine eigene Punktliste sein, z. B. [(0, 0), (2, 1), (1, 3)].
+    Mit `transponiert=True` kommt das Bild unter A^T gestrichelt dazu (SW 6).
     """
     import matplotlib.pyplot as plt
 
@@ -77,11 +81,16 @@ def plot_abbildung(A, P=None, titel: str = "", groesse: float = 5.5):
     px, py = _zeilen(Matrix(P.rows[:2]))
     qx, qy = _zeilen(res.bild)
 
-    fig, ax = _figur(plt, 1, px + qx, py + qy, groesse)
+    tx, ty = ([], [])
+    if transponiert:
+        tx, ty = _zeilen(transponierte_abbildung(A, P).bild)
+    fig, ax = _figur(plt, 1, px + qx + tx, py + qy + ty, groesse)
     _style_2d(ax, titel)
     ax.plot(px, py, color=RED, lw=3, label="Original", zorder=3)
     ax.plot(qx, qy, color=INK, lw=1.6, label="Bild", zorder=4)
-    _grenzen(ax, px + qx, py + qy)
+    if transponiert:
+        ax.plot(tx, ty, color="#86868b", lw=1.6, ls="--", label="Bild unter $A^T$", zorder=4)
+    _grenzen(ax, px + qx + tx, py + qy + ty)
     ax.legend(loc="best", fontsize=10)
     fig.tight_layout()
     return _finish(fig)

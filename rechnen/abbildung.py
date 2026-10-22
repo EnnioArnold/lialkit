@@ -394,6 +394,70 @@ def spiegelung_achse_weg(phi_grad, decimal: bool = False) -> ZusammensetzungResu
 
 
 # ==========================================================================
+# Die transponierte Abbildung (Notiz SW 6: »transponiert anschauen«)
+# ==========================================================================
+
+class TransponierteResult(Result):
+    title = "Die transponierte Abbildung"
+
+    def __init__(self, A: Matrix, At: Matrix, Q: Matrix, Qt: Matrix,
+                 eigenschaft: str, decimal: bool = False):
+        super().__init__(decimal or _naeherung(A, Q))
+        self.A, self.At, self.Q, self.Qt = A, At, Q, Qt
+        self.eigenschaft = eigenschaft
+        self.summary = eigenschaft
+        self.highlights = [("A^T", At), ("A^T P", Qt)]
+
+    @property
+    def bild(self) -> Matrix:
+        """Die Bildpunkte von A^T zum Zeichnen (bei homogenen Koordinaten ohne die 1-Zeile)."""
+        return Matrix(self.Qt.rows[:2]) if self.Qt.m == 3 else self.Qt
+
+
+def transponierte_abbildung(A, P=None, decimal: bool = False) -> TransponierteResult:
+    """
+    Was A^T mit denselben Punkten macht wie A (quadratische A, Standard: Einheitsquadrat).
+
+    Die Zeilen von A werden zu den Spalten von A^T, also zu den Bildern von
+    e₁, e₂. Gleich bleibt |det|: die Fläche ändert sich um denselben Faktor.
+    Sonst ist A^T im Allgemeinen eine andere Abbildung; bei symmetrischem A
+    dieselbe, bei Drehungen und Spiegelungen (A^T·A = E) die Umkehrung.
+    """
+    A = _mat(A)
+    if not A.is_square():
+        raise ValueError("Die transponierte Abbildung gibt es hier nur für quadratische Matrizen")
+    P = EINHEITSQUADRAT if P is None else punkte(P)
+    At = A.T
+    Q, Qt = abbilden(A, P).Q, abbilden(At, P).Q
+    if A.rows == At.rows:
+        eig = "A ist symmetrisch: A^T = A, beide Abbildungen sind dieselbe."
+    elif _nah(At @ A, Matrix.identity(A.n)):
+        eig = ("A^T·A = E: A^T ist die Umkehrung von A (A^T = A⁻¹); "
+               "sie macht A wieder rückgängig.")
+    else:
+        eig = ("A^T ist eine andere Abbildung als A: die Bilder von e₁, e₂ "
+               "sind die Zeilen von A.")
+    steps = [
+        Step("Zeilen und Spalten vertauschen",
+             items=[("A", A), ("A^T", At)],
+             note="Die Spalten von A^T sind die Zeilen von A, also die Bilder "
+                  "von e₁ und e₂ unter A^T."),
+        Step("Dieselben Punkte, zwei Abbildungen",
+             detail=r"Q = A \cdot P \qquad Q' = A^T \cdot P",
+             items=[("P", P), ("A\\,P", Q), ("A^T P", Qt)]),
+    ]
+    if A.n == 2:
+        dA, dAt = A.rows[0][0] * A.rows[1][1] - A.rows[0][1] * A.rows[1][0], \
+            At.rows[0][0] * At.rows[1][1] - At.rows[0][1] * At.rows[1][0]
+        steps.append(Step("Fläche", detail=f"\\det A = {tex_number(dA)} = \\det A^T = {tex_number(dAt)}",
+                          note="Die Determinante ändert sich beim Transponieren nicht."))
+    steps.append(Step("Einordnung", note=eig))
+    out = TransponierteResult(A, At, Q, Qt, eig, decimal)
+    out.steps = steps
+    return out
+
+
+# ==========================================================================
 # Ist eine Abbildung linear? (Folie 8)
 # ==========================================================================
 

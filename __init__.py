@@ -19,7 +19,7 @@ Kurzübersicht
     lu(A)                       # LR-Zerlegung
     inverse(A)                  # über Gauss-Jordan
     det(A)                      # Determinante
-    abbilden(drehung(30), P)    # lineare Abbildung (SW 5), Bildpunkte Q = A·P
+    abbilden(drehung(30), P)    # lineare Abbildung (SW 5/6), Bildpunkte Q = A·P
 
     u, v = Vector([1, 2, 3]), Vector([4, 5, 6])
     cross(u, v)
@@ -50,14 +50,16 @@ from .rechnen.solving import GaussResult, gauss, gauss_jordan, rank, solve
 from .rechnen.abbildung import (BASIS_FOLIE_6, BUCHSTABE_F_AUFGABE,
                                 BUCHSTABE_F_FOLIEN, EINHEITSQUADRAT, PHI_REIHE,
                                 AbbildungResult, FindeResult, LinearResult,
-                                RotationsreiheResult, ZusammensetzungResult,
+                                RotationsreiheResult, TransponierteResult,
+                                ZusammensetzungResult,
                                 abbilden, basiswechsel, drehstreckung, drehung,
                                 finde_abbildung, homogen, homogen_punkte,
                                 ist_linear, pruefe_linear, punkte,
                                 rotationsmatrix, rotationsreihe, scherung,
                                 skalierung, spiegelung_achse,
                                 spiegelung_achse_weg, spiegelung_x, spiegelung_y,
-                                verschiebung, zusammensetzen)
+                                transponierte_abbildung, verschiebung,
+                                zusammensetzen)
 from .grafik.plots import (plot_line, plot_plane, plot_spat, plot_transformation,
                     plot_vectors, has_plotly)
 from .grafik.plots_abbildung import (plot_abbildung, plot_basiswechsel,
@@ -102,14 +104,14 @@ __all__ = [
     "add", "position", "scale",
     "triangle_inequality", "cauchy_schwarz", "Line", "Plane",
     "DotResult", "CrossResult", "SpatResult", "AngleResult",
-    # Lineare Abbildungen (SW 5)
+    # Lineare Abbildungen (SW 5/6)
     "skalierung", "drehung", "rotationsmatrix", "drehstreckung", "scherung",
     "spiegelung_x", "spiegelung_y", "spiegelung_achse", "spiegelung_achse_weg",
     "homogen", "verschiebung", "homogen_punkte", "punkte",
     "abbilden", "basiswechsel", "zusammensetzen",
     "pruefe_linear", "ist_linear", "finde_abbildung", "rotationsreihe",
     "AbbildungResult", "ZusammensetzungResult", "LinearResult", "FindeResult",
-    "RotationsreiheResult",
+    "RotationsreiheResult", "transponierte_abbildung", "TransponierteResult",
     "BUCHSTABE_F_FOLIEN", "BUCHSTABE_F_AUFGABE", "EINHEITSQUADRAT",
     "BASIS_FOLIE_6", "PHI_REIHE",
     # Zeichnen
@@ -136,6 +138,7 @@ def info() -> str:
         "  abbilden, basiswechsel, zusammensetzen (SW 5: lineare Abbildungen)",
         "  skalierung, drehung, drehstreckung, scherung, spiegelung_x/_y/_achse",
         "  homogen, verschiebung, pruefe_linear, finde_abbildung, rotationsreihe",
+        "  transponierte_abbildung (SW 6: was A^T mit denselben Punkten macht)",
         "",
         "Zeichnen:",
         "  plot_vectors, plot_spat, plot_line, plot_plane, plot_transformation",
