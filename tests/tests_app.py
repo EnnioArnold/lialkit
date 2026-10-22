@@ -147,6 +147,38 @@ def test_maps_page():
         w.deleteLater()
 
 
+def test_maps_week6():
+    """SW6: Transponierte und eigene Punkte auf der Seite »Abbildungen«."""
+    w = Q.MainWindow()
+    try:
+        w.resize(1240, 900)
+        w.show()
+        w.set_page(3)
+        page = w.page_maps
+        assert "Transponierte" in Q.MAP_OPS
+        assert Q.parse_points("(0,0) (2,1) (3,3)") == [(0, 0), (2, 1), (3, 3)]
+        try:
+            Q.parse_points("nix")
+            raise AssertionError("parse_points hätte scheitern müssen")
+        except ValueError:
+            pass
+        page.set_obj(2)                                   # eigene Punkte
+        page.pts_edit.setText("(0,0) (2,0) (2,1)")
+        page.set_op(list(Q.MAP_OPS.values()).index("transpose"))   # A = Scherung (1 1; 0 1)
+        page.compute()
+        r = page.result()
+        assert r.Q.rows == [[0, 2, 3], [0, 0, 1]] and r.Qt.rows == [[0, 2, 2], [0, 2, 3]]
+        page.draw()
+        assert page.plot.figure is not None
+        assert len(page.points(True).rows[0]) == 4        # geschlossen: erster Punkt am Ende
+        page.pts_edit.setText("kaputt")
+        page.compute()                                    # Fehlertext statt Absturz
+        assert page.lbl_err.text()
+    finally:
+        w.close()
+        w.deleteLater()
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

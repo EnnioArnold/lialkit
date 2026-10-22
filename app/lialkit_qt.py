@@ -3166,7 +3166,18 @@ MAP_TYPES = {
 }
 
 MAP_OPS = {"Abbilden": "apply", "Zusammensetzen": "compose",
-           "Aus Bildern ablesen": "read"}
+           "Aus Bildern ablesen": "read", "Transponierte": "transpose"}
+
+
+def parse_points(text: str):
+    """Eigene Punkte wie »(0,0) (2,1) (3,3)« als Liste von Paaren; ValueError, wenn nichts Lesbares da ist."""
+    import re
+
+    zahl = r"[-+]?\d+(?:\.\d+)?(?:/\d+)?"
+    paare = re.findall(rf"\(\s*({zahl})\s*[,;]\s*({zahl})\s*\)", text)
+    if len(paare) < 2:
+        raise ValueError("Mindestens zwei Punkte eingeben, z. B. (0,0) (2,1) (3,3)")
+    return [(parse_number(x), parse_number(y)) for x, y in paare]
 
 
 def map_matrix(typ: str, values: Sequence[str]):
@@ -3368,16 +3379,24 @@ class MapsPage(QWidget):
             rlay.addLayout(row)
         lay.addWidget(self.read_box)
 
+        self.pts_edit = QLineEdit("(0,0) (2,1) (3,3) (1,2)")
+        self.pts_edit.setObjectName("cell")
+        self.pts_edit.setFont(FONTS.f(13))
+        self.pts_edit.setToolTip("Punkte als (x,y), durch Leerzeichen getrennt; "
+                                 "für ein geschlossenes Bild den ersten Punkt am Ende wiederholen.")
+        self.pts_edit.textChanged.connect(self._input_changed)
+        self.pts_edit.setVisible(False)
         self.obj_row = QWidget()
         orow = QHBoxLayout(self.obj_row)
         orow.setContentsMargins(0, 0, 0, 0)
         orow.addWidget(label("Objekt", 11, "sec"))
-        self.seg_obj = Segmented(["Einheitsquadrat", "Buchstabe F"], 0,
-                                 seg_width=118)
+        self.seg_obj = Segmented(["Einheitsquadrat", "Buchstabe F", "Eigene"], 0,
+                                 seg_width=104)
         self.seg_obj.changed.connect(self.set_obj)
         orow.addWidget(self.seg_obj)
         orow.addStretch(1)
         lay.addWidget(self.obj_row)
+        lay.addWidget(self.pts_edit)
         self.lbl_err = label("", 11, "red", wrap=True)
         lay.addWidget(self.lbl_err)
 
@@ -3418,11 +3437,12 @@ class MapsPage(QWidget):
         self.op = list(MAP_OPS.values())[index]
         self.drop_op.set_value(list(MAP_OPS)[index])
         self.slot_a.setVisible(self.op != "read")
+        self.pts_edit.setVisible(self.op != "read" and self.obj == "own")
         self.slot_b.setVisible(self.op == "compose")
         self.read_box.setVisible(self.op == "read")
         self.obj_row.setVisible(self.op != "read")
         self.lbl_head.setText({"apply": "Abbildung A", "compose": "Zwei Abbildungen",
-                               "read": "Gegebenes Bild"}[self.op])
+                               "read": "Gegebenes Bild", "transpose": "Abbildung A und Aᵀ"}[self.op])
         self.lbl_note.setText({
             "apply": "Q = A·P: die Spalten von A sind die Bilder von e₁ und e₂, "
                      "die Punkte stehen spaltenweise in P.",
@@ -3430,12 +3450,15 @@ class MapsPage(QWidget):
                        "zuerst angewendete Matrix steht rechts.",
             "read": "Gibt es eine lineare Abbildung, die das Einheitsquadrat "
                     "auf diese Punkte abbildet? Sonst: geht es mit homogenen "
-                    "Koordinaten?"}[self.op])
+                    "Koordinaten?",
+            "transpose": "Die Zeilen von A sind die Spalten von Aᵀ. Die Zeichnung "
+                         "zeigt das Bild unter A (schwarz) und unter Aᵀ (gestrichelt)."}[self.op])
         self.lbl_err.setText("")
         self.anim.refresh()
 
     def set_obj(self, index: int):
-        self.obj = ("square", "F")[index]
+        self.obj = ("square", "F", "own")[index]
+        self.pts_edit.setVisible(self.op != "read" and self.obj == "own")
         self.anim.refresh()
 
     def set_format(self, index: int):
@@ -3448,6 +3471,11 @@ class MapsPage(QWidget):
         """Die Punkte des Objekts, spaltenweise; geschlossen für Zeichnung und Film."""
         from lialkit.rechnen.abbildung import BUCHSTABE_F_FOLIEN, EINHEITSQUADRAT
 
+        if self.obj == "own":
+            pts = parse_points(self.pts_edit.text())
+            if closed and pts[0] != pts[-1]:
+                pts = pts + pts[:1]
+            return _CoreMatrix([[p[0] for p in pts], [p[1] for p in pts]])
         if self.obj == "square":
             return EINHEITSQUADRAT if closed else _CoreMatrix(
                 [r[:4] for r in EINHEITSQUADRAT.rows])
@@ -3468,6 +3496,8 @@ class MapsPage(QWidget):
         A = self.slot_a.matrix()
         if self.op == "apply":
             return ab.abbilden(A, self.points(), decimal=self.decimal)
+        if self.op == "transpose":
+            return ab.transponierte_abbildung(A, self.points(), decimal=self.decimal)
         return ab.zusammensetzen(A, self.slot_b.matrix(), namen=("A", "B"),
                                  P=self.points(), decimal=self.decimal)
 
@@ -3488,7 +3518,7 @@ class MapsPage(QWidget):
         """(Matrix, Punkte, Titel) für Zeichnung und Film, oder ein Text, warum nichts da ist."""
         from lialkit.rechnen import abbildung as ab
 
-        if self.op == "apply":
+        if self.op in ("apply", "transpose"):
             return self.slot_a.matrix(), self.points(True), "Q = A·P"
         if self.op == "compose":
             C = ab.zusammensetzen(self.slot_a.matrix(),
@@ -3506,7 +3536,8 @@ class MapsPage(QWidget):
     def anim_key(self):
         return (self.op, self.obj, self.slot_a.state(),
                 self.slot_b.state() if self.op == "compose" else None,
-                tuple(map(tuple, self.q_vals)) if self.op == "read" else None)
+                tuple(map(tuple, self.q_vals)) if self.op == "read" else None,
+                self.pts_edit.text() if self.obj == "own" else None)
 
     def build_job(self, _scene: str, quality: str):
         got = self.matrix_to_draw()
@@ -3536,8 +3567,10 @@ class MapsPage(QWidget):
         else:
             try:
                 self.plot.show_figure(
-                    plot_abbildung(got[0], got[1], titel=got[2]),
-                    "Original in Rot, Bild in Schwarz.")
+                    plot_abbildung(got[0], got[1], titel=got[2],
+                                   transponiert=self.op == "transpose"),
+                    "Original in Rot, Bild in Schwarz."
+                    + (" Das Bild unter Aᵀ ist gestrichelt." if self.op == "transpose" else ""))
             except Exception as exc:
                 self.plot.show_message(f"Zeichnen ging nicht: {exc}")
         show_view(self, 1)
@@ -3678,7 +3711,7 @@ class MapsHelpDialog(HelpDialog):
     """Hilfe der Seite »Abbildungen«."""
 
     TITLE = "Lineare Abbildungen"
-    HEADING = "Die drei Rechnungen"
+    HEADING = "Die vier Rechnungen"
     INTRO = ("Eine lineare Abbildung der Ebene ist eine 2×2-Matrix A. Ihre "
              "Spalten sind die Bilder der Einheitsvektoren e₁ und e₂ — mehr "
              "braucht es nicht, um jeden Punkt abzubilden.")
@@ -3691,6 +3724,12 @@ class MapsHelpDialog(HelpDialog):
          "Erst A, dann B. Die zuerst angewendete Abbildung steht im Produkt "
          "rechts. Vertauscht man die Reihenfolge, kommt im Allgemeinen eine "
          "andere Abbildung heraus."),
+        ("Transponierte", "Aᵀ·P",
+         "Dieselben Punkte unter A und unter Aᵀ: die Zeilen von A sind die "
+         "Spalten von Aᵀ. Die Fläche (|det|) bleibt gleich; bei einer "
+         "Drehung macht Aᵀ die Abbildung rückgängig, bei symmetrischem A ist "
+         "sie dieselbe. »Eigene« unter Objekt nimmt deine Punkte, z. B. "
+         "(0,0) (2,1) (3,3)."),
         ("Aus Bildern ablesen", "f(0) = 0",
          "Aus den Bildern der Ecken des Einheitsquadrats wird A abgelesen. "
          "Wird der Nullpunkt nicht auf sich selbst abgebildet, gibt es keine "
